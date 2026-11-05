@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@keyframes inky-breathe {
+	0%, 100% { transform: translateY(0) scale(1, 1); }
+	50% { transform: translateY(-2px) scale(1.02, 0.98); }
+}
+@keyframes inky-bounce {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-6px); }
+}
+@keyframes inky-blink {
+	0%, 94%, 100% { transform: scaleY(1); }
+	97% { transform: scaleY(0.1); }
+}
+@keyframes inky-dot {
+	0%, 100% { transform: translateY(0); opacity: 0.5; }
+	50% { transform: translateY(-5px); opacity: 1; }
+}
+@keyframes inky-talk {
+	0%, 100% { transform: scaleY(1); }
+	50% { transform: scaleY(0.4); }
+}
+@keyframes inky-wiggle {
+	0%, 100% { transform: rotate(0deg); }
+	25% { transform: rotate(-6deg); }
+	75% { transform: rotate(6deg); }
+}
+
+.inky .inky-body { transform-origin: 60px 126px; animation: inky-breathe 3.2s ease-in-out infinite; }
+.inky-happy .inky-body { animation: inky-bounce 0.5s ease-in-out 3; }
+.inky-error .inky-body { animation: inky-wiggle 0.4s ease-in-out 2; }
+.inky .inky-blink { transform-origin: 60px 70px; animation: inky-blink 4.5s infinite; }
+.inky .inky-dot { animation: inky-dot 1s ease-in-out infinite; }
+.inky .inky-dot-2 { animation-delay: 0.15s; }
+.inky .inky-dot-3 { animation-delay: 0.3s; }
+.inky .inky-mouth { transform-origin: 60px 88px; animation: inky-talk 0.25s ease-in-out infinite; }
+.inky .inky-ribbon { transform-origin: 88px 112px; animation: inky-wiggle 2.6s ease-in-out infinite; }
