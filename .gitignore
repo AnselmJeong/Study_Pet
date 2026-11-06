@@ -5,3 +5,5 @@ artifacts/
 .hutch/
 .DS_Store
 package-lock.json
+release/
+.cottontail-tmp/

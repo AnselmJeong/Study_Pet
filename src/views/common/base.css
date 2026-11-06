@@ -89,3 +89,19 @@
 .inky-act-read .inky-book { transform-origin: 60px 110px; animation: inky-page 3s ease-in-out infinite; }
 .inky .inky-z { animation: inky-z 2.2s ease-in-out infinite; }
 .inky .inky-z-2 { animation-delay: 1.1s; }
+
+/* 캐릭터 팩: 이미지 전체에 덧입히는 움직임 (pack.json의 motion: true) */
+@keyframes pack-talk-bob {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-2px); }
+}
+.pack .pack-body { transform-origin: 50% 100%; animation: inky-breathe 3.4s ease-in-out infinite; }
+.pack-mood-talking .pack-body { animation: pack-talk-bob 0.45s ease-in-out infinite; }
+.pack-mood-happy .pack-body { animation: inky-bounce 0.5s ease-in-out 3; }
+.pack-mood-error .pack-body { animation: inky-wiggle 0.4s ease-in-out 2; }
+.pack-act-hop .pack-body { animation: inky-hop 0.7s ease-in-out 2; }
+.pack-act-lookAround .pack-body { animation: inky-look 2.4s ease-in-out 1; }
+.pack-act-stretch .pack-body { animation: inky-stretch 1.8s ease-in-out 1; }
+.pack-act-spin .pack-body { transform-origin: 50% 55%; animation: inky-spin 0.9s ease-in-out 1; }
+.pack-act-walk .pack-body { animation: inky-waddle 0.35s ease-in-out infinite; }
+.pack-act-doze .pack-body { animation: inky-doze 3s ease-in-out infinite; }

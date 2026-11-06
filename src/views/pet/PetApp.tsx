@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CaptureState, PetAction, PetMood } from "../../shared/types";
-import { Inky } from "../common/Inky";
+import { PetCharacter } from "../common/PetCharacter";
 import { api, on } from "../common/rpc";
 import { useChat } from "../common/useChat";
 
@@ -57,6 +57,7 @@ export function PetApp() {
 	const [inputOpen, setInputOpen] = useState(false);
 	const [text, setText] = useState("");
 	const [attach, setAttach] = useState(true);
+	const [search, setSearch] = useState(false);
 	const [bubbleVisible, setBubbleVisible] = useState(false);
 	const [hint, setHint] = useState<string | null>(null);
 	const [hovering, setHovering] = useState(false);
@@ -139,7 +140,7 @@ export function PetApp() {
 	async function submit() {
 		const t = text.trim();
 		if (!t) return;
-		const res = await api.ask({ text: t, attachScreen: attach });
+		const res = await api.ask({ text: t, attachScreen: attach, webSearch: search });
 		if (res.accepted) {
 			setText("");
 			setHint(null);
@@ -175,13 +176,13 @@ export function PetApp() {
 		<div className="fixed right-0 bottom-0 p-2">
 			<div
 				ref={rootRef}
-				className="flex flex-col items-end gap-2"
+				className="flex w-max flex-col items-end gap-2"
 				onMouseEnter={() => setHovering(true)}
 				onMouseLeave={() => setHovering(false)}
 			>
 				{bubbleVisible && last && (
-					<div className="relative max-w-[300px] rounded-2xl bg-white/95 px-3 py-2 text-[13px] leading-relaxed text-slate-800 shadow-lg ring-1 ring-black/10 select-text">
-						<div className="max-h-[220px] overflow-y-auto whitespace-pre-wrap break-words pr-1">
+					<div className="relative w-[380px] rounded-2xl bg-white/95 px-3 py-2 text-[13px] leading-relaxed text-slate-800 shadow-lg ring-1 ring-black/10 select-text">
+						<div className="max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words pr-1">
 							{last.text || (busy ? "…" : "")}
 						</div>
 						<div className="mt-1 flex justify-end gap-3 text-[11px] text-slate-500">
@@ -256,7 +257,11 @@ export function PetApp() {
 						<div className="flex items-center justify-between text-[11px] text-slate-300">
 							<label className="flex cursor-pointer items-center gap-1" title="질문할 때 현재 화면을 캡처해서 함께 보냄">
 								<input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
-								📷 화면 같이 보내기
+								📷 화면
+							</label>
+							<label className="flex cursor-pointer items-center gap-1" title="답하기 전에 웹 검색을 먼저 함 (꺼 둬도 필요하면 알아서 검색)">
+								<input type="checkbox" checked={search} onChange={(e) => setSearch(e.target.checked)} />
+								🔎 검색
 							</label>
 							<div className="flex items-center gap-2">
 								{hint && <span className="text-amber-300">{hint}</span>}
@@ -284,10 +289,7 @@ export function PetApp() {
 					onMouseUp={onPetMouseUp}
 					title="클릭: 물어보기 · 드래그: 이동"
 				>
-					{capture.running && (
-						<span className="absolute top-1 left-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white/80" title="화면 기록 중" />
-					)}
-					<Inky mood={mood} action={action} size={110} />
+					<PetCharacter mood={mood} action={action} size={110} />
 				</div>
 			</div>
 		</div>

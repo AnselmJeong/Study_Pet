@@ -49,6 +49,17 @@ export function idleSeconds(): number {
 	}
 }
 
+/** 화면이 잠겨 있으면 true (잠금 중에는 IOConsoleUsers에 CGSSessionScreenIsLocked=Yes가 생긴다) */
+export function screenLocked(): boolean {
+	if (process.platform !== "darwin") return false;
+	try {
+		const out = Bun.spawnSync(["/usr/sbin/ioreg", "-n", "Root", "-d1"], { stdout: "pipe" }).stdout.toString();
+		return /"CGSSessionScreenIsLocked"\s*=\s*Yes/.test(out);
+	} catch {
+		return false;
+	}
+}
+
 /** 현재 메인 화면을 캡처해서 파일로 저장. 권한이 없거나 실패하면 null */
 export async function captureScreen(): Promise<Shot | null> {
 	if (process.platform !== "darwin") return null;

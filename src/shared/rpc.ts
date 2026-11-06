@@ -10,6 +10,7 @@ import type {
 	TestResult,
 	TimelineEntry,
 } from "./types";
+import type { PackInfo, ResolvedPack } from "./pack";
 
 type Tab = "chat" | "timeline" | "settings";
 
@@ -18,7 +19,8 @@ export type StudyPetRPC = {
 	bun: RPCSchema<{
 		requests: {
 			ask: {
-				params: { text: string; attachScreen: boolean };
+				/** webSearch: true면 답하기 전에 질문으로 웹 검색을 먼저 한다 */
+				params: { text: string; attachScreen: boolean; webSearch?: boolean };
 				response: { accepted: boolean; reason?: string };
 			};
 			cancel: { params: {}; response: { ok: boolean } };
@@ -27,7 +29,10 @@ export type StudyPetRPC = {
 			getSettings: { params: {}; response: AppSettings };
 			/** apiKeys: undefined = 그대로, null/"" = 삭제, 문자열 = 저장 */
 			saveSettings: {
-				params: { settings: AppSettings; apiKeys?: { claude?: string | null; openai?: string | null } };
+				params: {
+					settings: AppSettings;
+					apiKeys?: { claude?: string | null; openai?: string | null; tinyfish?: string | null };
+				};
 				response: AppSettings;
 			};
 			listModels: {
@@ -38,6 +43,7 @@ export type StudyPetRPC = {
 				params: { provider: ProviderId; settings: AppSettings; apiKey?: string | null };
 				response: TestResult;
 			};
+			testSearch: { params: { apiKey?: string | null }; response: TestResult };
 			getScreenPermission: { params: {}; response: ScreenPermission };
 			requestScreenPermission: { params: {}; response: ScreenPermission };
 			openPanel: { params: { tab?: Tab }; response: { ok: boolean } };
@@ -48,6 +54,15 @@ export type StudyPetRPC = {
 			startCapture: { params: { goal: string }; response: CaptureState };
 			stopCapture: { params: {}; response: CaptureState };
 			getTimeline: { params: {}; response: TimelineEntry[] };
+			/** 캐릭터 팩 (docs/CHARACTER_PACKS.md). 기본 팩은 WebView가 직접 들고 있다 */
+			listPacks: { params: {}; response: PackInfo[] };
+			getPack: { params: { id: string }; response: { pack: ResolvedPack | null } };
+			setPetPack: { params: { id: string }; response: AppSettings };
+			importPack: { params: {}; response: { ok: boolean; info?: PackInfo; error?: string; canceled?: boolean } };
+			removePack: { params: { id: string }; response: { ok: boolean } };
+			openPacksFolder: { params: {}; response: { ok: boolean } };
+			/** 우클릭 시 WebView 기본 메뉴(새로 고침/검사) 대신 앱 네이티브 메뉴를 띄운다 */
+			showContextMenu: { params: { where: "pet" | "panel"; editable?: boolean; hasSelection?: boolean }; response: { ok: boolean } };
 		};
 		messages: {};
 	}>;

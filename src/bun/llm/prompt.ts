@@ -17,6 +17,7 @@ export function systemPrompt(s: AppSettings, now: Date): string {
 		"- 짧게 답한다. 핵심 2~4문장이 기본이고, 사용자가 자세히 원할 때만 길게 쓴다. 수식은 LaTeX($...$)로 쓴다.",
 		"- 죄책감을 주는 표현(예: '또 딴짓했네')은 쓰지 않는다. 칭찬은 구체적으로 한다.",
 		"- 사용자가 쓰는 언어로 답한다.",
+		"- web_search 도구나 [웹 검색 결과]가 있으면, 최신 정보·사실 확인·자료 찾기가 필요할 때만 쓴다. 검색 결과를 근거로 답할 때는 끝에 출처 URL을 1~3개 붙인다.",
 		"",
 		`현재 시각: ${now.toLocaleString("ko-KR", { hour12: false })}`,
 	].join("\n");

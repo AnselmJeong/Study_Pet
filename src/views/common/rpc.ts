@@ -35,6 +35,9 @@ const rpc = Electroview.defineRPC<StudyPetRPC>({
 			focusInput: (p) => emit("focusInput", p),
 			showTab: (p) => emit("showTab", p),
 			settingsChanged: (p) => emit("settingsChanged", p),
+			captureState: (p) => emit("captureState", p),
+			timelineAdded: (p) => emit("timelineAdded", p),
+			petSays: (p) => emit("petSays", p),
 		},
 	},
 });
@@ -42,3 +45,14 @@ const rpc = Electroview.defineRPC<StudyPetRPC>({
 const electrobun = new Electrobun.Electroview({ rpc });
 
 export const api = electrobun.rpc!.request;
+
+/** WebView 기본 우클릭 메뉴(새로 고침, 요소 검사)를 막고 앱 메뉴를 띄운다 */
+export function installContextMenu(where: "pet" | "panel") {
+	window.addEventListener("contextmenu", (e) => {
+		e.preventDefault();
+		const t = e.target as HTMLElement | null;
+		const editable = Boolean(t?.closest?.("input, textarea, [contenteditable=''], [contenteditable='true']"));
+		const hasSelection = Boolean(window.getSelection()?.toString());
+		void api.showContextMenu({ where, editable, hasSelection }).catch(() => {});
+	});
+}
