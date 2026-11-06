@@ -22,7 +22,7 @@ import { supportsVision } from "./llm/router";
 import { testSearch } from "./search";
 import { CLAUDE_MODELS, claudeTest } from "./llm/claudeSub";
 import { listModels, testConnection } from "./llm/openaiCompat";
-import { claudeApiKey, dataDir, getSettings, openaiApiKey, saveSettings, setPetPackId } from "./settings";
+import { claudeApiKey, dataDir, getSettings, openaiApiKey, saveSettings, setPetAnchor, setPetPackId } from "./settings";
 import * as packs from "./packs";
 import { INKY_ID, PACK_ID } from "../shared/pack";
 
@@ -172,6 +172,10 @@ function makeRPC() {
 					await walkPet(dx, durationMs);
 					return { ok: true };
 				},
+				dragPet: ({ phase, dx, dy }) => {
+					dragPet(phase, dx ?? 0, dy ?? 0);
+					return { ok: true };
+				},
 				getCaptureState: () => context.getState(),
 				startCapture: ({ goal }) => {
 					context.start(goal);
@@ -220,56 +224,143 @@ function makeRPC() {
 
 let quitting = false;
 
-function createPetWindow() {
+type Rect = { x: number; y: number; width: number; height: number };
+
+/** rect가 가장 많이 걸친 화면 (안 걸치면 메인 화면) */
+function displayFor(r: Rect) {
+	const displays = Screen.getAllDisplays();
+	let best = Screen.getPrimaryDisplay();
+	let bestArea = 0;
+	for (const d of displays) {
+		const a = d.workArea;
+		const w = Math.min(r.x + r.width, a.x + a.width) - Math.max(r.x, a.x);
+		const h = Math.min(r.y + r.height, a.y + a.height) - Math.max(r.y, a.y);
+		if (w > 0 && h > 0 && w * h > bestArea) {
+			bestArea = w * h;
+			best = d;
+		}
+	}
+	return best;
+}
+
+/** 그 화면의 작업 영역(메뉴바·Dock 제외) 안으로 넣는다 */
+function clampToWorkArea(r: Rect): Rect {
+	const a = displayFor(r).workArea;
+	const width = Math.min(r.width, a.width);
+	const height = Math.min(r.height, a.height);
+	return {
+		x: Math.round(Math.max(a.x, Math.min(a.x + a.width - width, r.x))),
+		y: Math.round(Math.max(a.y, Math.min(a.y + a.height - height, r.y))),
+		width,
+		height,
+	};
+}
+
+/** 메인 화면 오른쪽 아래 자리 */
+function homeFrame(width: number, height: number): Rect {
 	const wa = Screen.getPrimaryDisplay().workArea;
-	const x = wa.x + wa.width - PET_COMPACT.width - MARGIN;
-	const y = wa.y + wa.height - PET_COMPACT.height - MARGIN;
+	return { x: wa.x + wa.width - width - MARGIN, y: wa.y + wa.height - height - MARGIN, width, height };
+}
+
+/** 저장해 둔 위치 (화면 밖이면 null) */
+function savedFrame(width: number, height: number): Rect | null {
+	const a = getSettings().petAnchor;
+	if (!a || !Number.isFinite(a.right) || !Number.isFinite(a.bottom)) return null;
+	const r = { x: a.right - width, y: a.bottom - height, width, height };
+	// 창 가운데가 어느 화면의 작업 영역에도 없으면 (모니터를 뺐을 때 등) 버린다
+	const cx = r.x + width / 2;
+	const cy = r.y + height / 2;
+	const onScreen = Screen.getAllDisplays().some(
+		(d) => cx >= d.workArea.x && cx < d.workArea.x + d.workArea.width && cy >= d.workArea.y && cy < d.workArea.y + d.workArea.height,
+	);
+	return onScreen ? clampToWorkArea(r) : null;
+}
+
+let anchorTimer: ReturnType<typeof setTimeout> | null = null;
+/** 지금 펫 위치(오른쪽 아래 모서리)를 조금 뒤에 설정에 저장한다 */
+function rememberPetPosition() {
+	if (anchorTimer) clearTimeout(anchorTimer);
+	anchorTimer = setTimeout(() => {
+		anchorTimer = null;
+		if (!petWin) return;
+		const f = petWin.getFrame();
+		setPetAnchor({ right: f.x + f.width, bottom: f.y + f.height });
+	}, 800);
+}
+
+function createPetWindow(atHome = false) {
+	const f = (!atHome && savedFrame(PET_COMPACT.width, PET_COMPACT.height)) || homeFrame(PET_COMPACT.width, PET_COMPACT.height);
 
 	petWin = new BrowserWindow({
 		title: APP_NAME,
 		url: "views://app/pet/index.html",
 		titleBarStyle: "hidden",
 		transparent: true,
-		frame: { ...PET_COMPACT, x, y },
+		frame: f,
 		rpc: makeRPC(),
 	});
 	petWin.setAlwaysOnTop(true);
 	petWin.setVisibleOnAllWorkspaces(true);
 	petWin.on("close", () => {
 		petWin = null;
-		// ⌘W 등으로 실수로 닫혀도 잉키가 사라지지 않게 다시 띄운다
+		drag = null;
+		// ⌘W 등으로 실수로 닫혀도 펫이 사라지지 않게 다시 띄운다 (저장한 자리로)
 		if (!quitting) setTimeout(() => !petWin && !quitting && createPetWindow(), 800);
 	});
 }
 
-/** 오른쪽 아래 모서리를 고정한 채 크기를 바꾼다 */
+/** 지금 창의 오른쪽 아래 모서리를 고정한 채 크기를 바꾸고, 그 화면 작업 영역 안으로 넣는다 */
 function resizePet(width: number, height: number) {
 	if (!petWin) return;
 	const w = Math.round(Math.max(PET_COMPACT.width, Math.min(width, 480)));
 	const h = Math.round(Math.max(PET_COMPACT.height, Math.min(height, 640)));
 	const f = petWin.getFrame();
 	if (f.width === w && f.height === h) return;
-	petWin.setFrame(f.x + f.width - w, f.y + f.height - h, w, h);
+	const r = clampToWorkArea({ x: f.x + f.width - w, y: f.y + f.height - h, width: w, height: h });
+	petWin.setFrame(r.x, r.y, r.width, r.height);
 }
 
-let walking = false;
-async function walkPet(dx: number, durationMs: number) {
-	if (!petWin || walking) return;
-	walking = true;
-	try {
-		const wa = Screen.getPrimaryDisplay().workArea;
+// 드래그 중이면 걷기를 멈추고, 걷는 중에 드래그가 시작돼도 걷기가 위치를 덮어쓰지 않게 한다
+let drag: { x: number; y: number } | null = null;
+let walkSeq = 0;
+
+function dragPet(phase: "start" | "move" | "end", dx: number, dy: number) {
+	if (!petWin) return;
+	if (phase === "start") {
+		walkSeq++; // 걷던 중이면 멈춘다
 		const f = petWin.getFrame();
-		const target = Math.max(wa.x, Math.min(wa.x + wa.width - f.width, f.x + dx));
-		const steps = Math.max(1, Math.round(Math.min(durationMs, 4000) / 33));
-		for (let i = 1; i <= steps; i++) {
-			if (!petWin) break;
-			const cur = petWin.getFrame();
-			petWin.setPosition(Math.round(f.x + ((target - f.x) * i) / steps), cur.y);
-			await Bun.sleep(33);
-		}
-	} finally {
-		walking = false;
+		drag = { x: f.x, y: f.y };
+		return;
 	}
+	if (!drag) return;
+	if (phase === "move") {
+		if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+		petWin.setPosition(Math.round(drag.x + dx), Math.round(drag.y + dy));
+		return;
+	}
+	// end: 놓은 자리의 화면 작업 영역 안으로 넣고 저장한다
+	drag = null;
+	const f = petWin.getFrame();
+	const r = clampToWorkArea(f);
+	if (r.x !== f.x || r.y !== f.y) petWin.setPosition(r.x, r.y);
+	rememberPetPosition();
+}
+
+async function walkPet(dx: number, durationMs: number) {
+	if (!petWin || drag) return;
+	const seq = ++walkSeq;
+	const f = petWin.getFrame();
+	// 지금 있는 화면 안에서만, 지금 자리 기준으로 옆으로 걷는다
+	const a = displayFor(f).workArea;
+	const target = Math.max(a.x, Math.min(a.x + a.width - f.width, f.x + dx));
+	const steps = Math.max(1, Math.round(Math.min(durationMs, 4000) / 33));
+	for (let i = 1; i <= steps; i++) {
+		if (!petWin || drag || seq !== walkSeq) return;
+		const cur = petWin.getFrame();
+		petWin.setPosition(Math.round(cur.x + (target - cur.x) / (steps - i + 1)), cur.y);
+		await Bun.sleep(33);
+	}
+	if (seq === walkSeq) rememberPetPosition();
 }
 
 // ---------- 패널 창 ----------
@@ -508,14 +599,20 @@ ApplicationMenu.on("application-menu-clicked", (event: any) => runMenuAction(eve
 /** 펫 창이 닫혔거나 화면 밖에 있으면 메인 화면 오른쪽 아래로 다시 데려온다 */
 function summonPet() {
 	if (!petWin) {
-		createPetWindow();
+		createPetWindow(true);
+		rememberPetPosition();
 		return;
 	}
-	const wa = Screen.getPrimaryDisplay().workArea;
+	// 드래그·걷기 상태를 모두 끊고 메인 화면 오른쪽 아래로. 이후에는 다시 자유롭게 옮길 수 있다
+	drag = null;
+	walkSeq++;
+	send("petDragReset", {}, "pet");
 	const f = petWin.getFrame();
-	petWin.setFrame(wa.x + wa.width - f.width - MARGIN, wa.y + wa.height - f.height - MARGIN, f.width, f.height);
+	const r = homeFrame(f.width, f.height);
+	petWin.setFrame(r.x, r.y, r.width, r.height);
 	petWin.setAlwaysOnTop(true);
 	petWin.show();
+	rememberPetPosition();
 }
 
 function focusPetInput() {

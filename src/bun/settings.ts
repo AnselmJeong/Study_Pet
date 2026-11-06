@@ -103,6 +103,8 @@ export function saveSettings(
 	const s: AppSettings = structuredClone(next);
 	// 캐릭터는 설정 > 캐릭터에서 바로 바뀌므로(setPetPackId) 저장 버튼이 옛 값으로 덮어쓰지 않게 한다
 	s.petPackId = current.petPackId;
+	// 펫 위치도 창을 옮길 때 따로 저장한다 (setPetAnchor)
+	s.petAnchor = current.petAnchor;
 	s.openai.baseUrl = s.openai.baseUrl.trim().replace(/\/+$/, "");
 	s.capture.intervalSec = Math.max(20, Math.min(600, Math.round(s.capture.intervalSec || 60)));
 	s.capture.maxShots = Math.max(1, Math.min(100, Math.round(s.capture.maxShots || 20)));
@@ -126,6 +128,13 @@ export function saveSettings(
 export function setPetPackId(id: string): AppSettings {
 	current = { ...current, petPackId: id };
 	return saveSettings(current);
+}
+
+export function setPetAnchor(anchor: { right: number; bottom: number }): void {
+	const a = { right: Math.round(anchor.right), bottom: Math.round(anchor.bottom) };
+	if (current.petAnchor?.right === a.right && current.petAnchor?.bottom === a.bottom) return;
+	current = { ...current, petAnchor: a };
+	saveSettings(current);
 }
 
 /** 아직 저장 전인 키(override)가 있으면 그것을, 없으면 Keychain 값을 쓴다 */

@@ -60,6 +60,8 @@ export type StudyPetRPC = {
 			resizePet: { params: { width: number; height: number }; response: { ok: boolean } };
 			/** 펫 창을 옆으로 천천히 이동 (걷기 행동). 화면 밖으로는 안 나감 */
 			walkPet: { params: { dx: number; durationMs: number }; response: { ok: boolean } };
+			/** 펫 드래그. start에서 창 위치를 기억하고, move는 시작점 기준 이동량(dx, dy)만큼 옮긴다. end에서 위치 저장 */
+			dragPet: { params: { phase: "start" | "move" | "end"; dx?: number; dy?: number }; response: { ok: boolean } };
 			getCaptureState: { params: {}; response: CaptureState };
 			startCapture: { params: { goal: string }; response: CaptureState };
 			stopCapture: { params: {}; response: CaptureState };
@@ -87,6 +89,8 @@ export type StudyPetRPC = {
 			historyCleared: {};
 			mood: { mood: PetMood };
 			focusInput: {};
+			/** 불러오기: 진행 중인 드래그를 끊는다 */
+			petDragReset: {};
 			/** 트레이 등에서 찍은 이미지를 펫 입력창에 붙인다 */
 			attachmentAdded: Attachment;
 			/** 첨부 캡처 실패를 펫 입력창에 보여 준다 */

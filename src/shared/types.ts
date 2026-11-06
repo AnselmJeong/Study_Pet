@@ -69,6 +69,8 @@ export type AppSettings = {
 	tone: "banmal" | "jondaetmal";
 	/** 펫 캐릭터 팩 id ("inky" = 기본 잉키). docs/CHARACTER_PACKS.md */
 	petPackId: string;
+	/** 사용자가 놓아 둔 펫 창의 오른쪽 아래 모서리 (화면 좌표). 없으면 메인 화면 오른쪽 아래 */
+	petAnchor?: { right: number; bottom: number };
 };
 
 export type ChatMessage = {

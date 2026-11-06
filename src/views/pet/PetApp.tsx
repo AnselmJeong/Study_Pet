@@ -67,7 +67,9 @@ export function PetApp() {
 
 	const rootRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
-	const down = useRef({ x: 0, y: 0 });
+	const petRef = useRef<HTMLDivElement>(null);
+	/** 왼쪽 버튼으로 누른 동안만 살아 있는 드래그 상태 */
+	const drag = useRef<{ pointerId: number; x: number; y: number; moved: boolean; raf: number; dx: number; dy: number } | null>(null);
 	const walkDir = useRef<1 | -1>(-1);
 
 	const openInput = () => {
@@ -95,8 +97,19 @@ export function PetApp() {
 			}),
 			on("petSays", ({ kind }) => setAction(kind === "joke" ? "spin" : kind === "break" ? "stretch" : "wave")),
 			on("captureState", setCapture),
+			on("petDragReset", () => endDrag(false)),
 		];
-		return () => offs.forEach((off) => off());
+		// 창 밖에서 버튼을 놓거나 포커스를 잃어도 드래그가 남지 않게 한다
+		const stop = () => endDrag(false);
+		window.addEventListener("blur", stop);
+		window.addEventListener("pointerup", stop);
+		document.addEventListener("visibilitychange", stop);
+		return () => {
+			offs.forEach((off) => off());
+			window.removeEventListener("blur", stop);
+			window.removeEventListener("pointerup", stop);
+			document.removeEventListener("visibilitychange", stop);
+		};
 	}, []);
 
 	// 가만히 있을 때 8~20초마다 행동 하나
@@ -162,19 +175,54 @@ export function PetApp() {
 		}
 	}
 
-	function onPetMouseUp(e: React.MouseEvent) {
-		const dx = e.screenX - down.current.x;
-		const dy = e.screenY - down.current.y;
-		if (dx * dx + dy * dy < 25) {
-			setAction("hop");
-			setTimeout(() => setAction("none"), ACTION_MS.hop);
-			setInputOpen((v) => {
-				const next = !v;
-				if (next) setTimeout(() => inputRef.current?.focus(), 30);
-				return next;
-			});
-			if (last) setBubbleVisible(true);
-		}
+	/** 드래그를 끝낸다. click이면 (거의 안 움직였으면) 입력창을 연다 */
+	function endDrag(asClick: boolean) {
+		const d = drag.current;
+		if (!d) return;
+		drag.current = null;
+		cancelAnimationFrame(d.raf);
+		const el = petRef.current;
+		if (el?.hasPointerCapture?.(d.pointerId)) el.releasePointerCapture(d.pointerId);
+		void api.dragPet({ phase: "end" }).catch(() => {});
+		if (asClick && !d.moved) onPetClick();
+	}
+
+	function onPetPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+		// 왼쪽 버튼만 끈다. 오른쪽 클릭(⌃클릭 포함)은 메뉴용이라 드래그를 시작하지 않는다
+		if (e.button !== 0 || e.ctrlKey) return;
+		e.preventDefault();
+		endDrag(false);
+		e.currentTarget.setPointerCapture(e.pointerId);
+		drag.current = { pointerId: e.pointerId, x: e.screenX, y: e.screenY, moved: false, raf: 0, dx: 0, dy: 0 };
+		void api.dragPet({ phase: "start" }).catch(() => {});
+	}
+
+	function onPetPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+		const d = drag.current;
+		if (!d || e.pointerId !== d.pointerId) return;
+		// 버튼이 이미 떨어졌는데 pointerup을 못 받은 경우
+		if ((e.buttons & 1) === 0) return endDrag(false);
+		d.dx = e.screenX - d.x;
+		d.dy = e.screenY - d.y;
+		if (!d.moved && d.dx * d.dx + d.dy * d.dy < 25) return;
+		d.moved = true;
+		if (d.raf) return;
+		d.raf = requestAnimationFrame(() => {
+			if (drag.current !== d) return;
+			d.raf = 0;
+			void api.dragPet({ phase: "move", dx: d.dx, dy: d.dy }).catch(() => {});
+		});
+	}
+
+	function onPetClick() {
+		setAction("hop");
+		setTimeout(() => setAction("none"), ACTION_MS.hop);
+		setInputOpen((v) => {
+			const next = !v;
+			if (next) setTimeout(() => inputRef.current?.focus(), 30);
+			return next;
+		});
+		if (last) setBubbleVisible(true);
 	}
 
 	const minutes = capture.startedAt ? Math.floor((Date.now() - capture.startedAt) / 60_000) : 0;
@@ -290,9 +338,13 @@ export function PetApp() {
 				)}
 
 				<div
-					className="electrobun-webkit-app-region-drag relative cursor-pointer"
-					onMouseDown={(e) => (down.current = { x: e.screenX, y: e.screenY })}
-					onMouseUp={onPetMouseUp}
+					ref={petRef}
+					className="relative cursor-pointer touch-none select-none"
+					onPointerDown={onPetPointerDown}
+					onPointerMove={onPetPointerMove}
+					onPointerUp={(e) => drag.current?.pointerId === e.pointerId && endDrag(true)}
+					onPointerCancel={() => endDrag(false)}
+					onLostPointerCapture={() => endDrag(false)}
 					title="클릭: 물어보기 · 드래그: 이동"
 				>
 					<PetCharacter mood={mood} action={action} size={110} />
