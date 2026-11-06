@@ -58,8 +58,9 @@ src/views/panel/  대화·기록·설정 패널
 ## 릴리스 설치 (/Applications)
 
 ```bash
+scripts/make-signing-cert.sh  # (한 번만) 로그인 키체인에 로컬 서명 ID "Inky Local Signing" 생성
 hutch run build            # stable 채널 빌드 → build/stable-macos-arm64/
-scripts/install-app.sh     # 앱을 풀어 LSUIElement(Dock 숨김) 패치, ad-hoc 재서명, /Applications/Inky.app 설치
+scripts/install-app.sh     # 앱을 풀어 LSUIElement(Dock 숨김) 패치, "Inky Local Signing"으로 재서명, /Applications/Inky.app 설치
 open "/Applications/Inky.app"
 ```
 
@@ -67,4 +68,6 @@ open "/Applications/Inky.app"
 - stable 데이터 폴더: `~/Library/Application Support/dev.anselm.studypet/stable/` (dev는 `.../dev/`).
 - 앱 이름은 Inky(번들 ID dev.anselm.studypet, Keychain 서비스도 동일). 개발 실행은 Inky-dev.
 - 펫/패널 창 우클릭은 WebView 기본 메뉴 대신 앱 메뉴(ContextMenu)를 띄운다.
-- ad-hoc 서명이라 재설치할 때마다 화면 기록 권한을 다시 켜야 할 수 있다.
+- 서명: `scripts/make-signing-cert.sh`가 자체 서명 코드서명 인증서(CN `Inky Local Signing`, 10년, codeSigning 용도)를 로그인 키체인에 만든다. 개인 키는 임시 폴더에서만 만들고 지운다. 같은 ID로 서명하면 재설치해도 화면 기록 권한이 유지된다 (처음 한 번만 다시 허용). 시스템 신뢰 설정은 필요 없다.
+- 서명 ID가 없으면 install-app.sh는 경고를 띄우고 ad-hoc(`-`)으로 서명한다. 이때는 재설치할 때마다 화면 기록 권한을 다시 켜야 할 수 있다.
+- 확인: `codesign -dv --verbose=4 /Applications/Inky.app 2>&1 | grep Authority` → `Authority=Inky Local Signing`
