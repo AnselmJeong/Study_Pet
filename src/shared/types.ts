@@ -66,7 +66,6 @@ export type AppSettings = {
 	proactive: ProactiveSettings;
 	search: SearchSettings;
 	/** 질문할 때 현재 화면을 기본으로 첨부할지 */
-	attachScreenByDefault: boolean;
 	tone: "banmal" | "jondaetmal";
 	/** 펫 캐릭터 팩 id ("inky" = 기본 잉키). docs/CHARACTER_PACKS.md */
 	petPackId: string;
@@ -76,7 +75,10 @@ export type ChatMessage = {
 	id: string;
 	role: "user" | "assistant";
 	text: string;
+	/** 예전 형식: 화면 1장 첨부 */
 	withScreen?: boolean;
+	/** 첨부한 이미지들의 작은 미리보기 (data URL) */
+	thumbs?: string[];
 	/** 이 질문에 웹 검색을 썼는지 */
 	searched?: boolean;
 	ts: number;
@@ -122,3 +124,15 @@ export type CaptureState = {
 	startedAt: number | null;
 	lastCaptureAt: number | null;
 };
+
+/** 질문에 붙인 이미지 (파일은 Bun이 들고 있고 WebView는 id와 미리보기만 가진다) */
+export type Attachment = {
+	id: string;
+	kind: "image" | "screen" | "region";
+	/** 작은 JPEG data URL */
+	thumb: string;
+};
+
+export type AttachResult =
+	| { ok: true; attachment: Attachment }
+	| { ok: false; reason: "permission" | "canceled" | "failed" | "limit"; message?: string };

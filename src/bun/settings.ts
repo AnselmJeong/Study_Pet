@@ -43,7 +43,6 @@ const defaults: AppSettings = {
 	},
 	proactive: { enabled: true, minIntervalMin: 12, maxIntervalMin: 25, jokes: true },
 	search: { enabled: true, hasApiKey: false },
-	attachScreenByDefault: true,
 	tone: "banmal",
 	petPackId: "inky",
 };
@@ -76,6 +75,8 @@ function load(): AppSettings {
 			s.capture = { ...defaults.capture, ...(raw.capture ?? {}) };
 			s.proactive = { ...defaults.proactive, ...(raw.proactive ?? {}) };
 			s.search = { ...defaults.search, ...(raw.search ?? {}) };
+			// 예전 설정 (질문할 때 화면 자동 첨부): 이제는 📷 버튼으로 바로 찍어 미리보기로 붙인다
+			delete (s as any).attachScreenByDefault;
 		} catch (err) {
 			console.error("[settings] settings.json 읽기 실패, 기본값 사용", err);
 		}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AppSettings, ModelInfo, OpenAIPreset, ProviderId, TestResult } from "../../shared/types";
 import { api } from "../common/rpc";
 import { CharacterSection } from "./CharacterSection";
+import { useCharacter } from "../common/useCharacter";
 
 const PROVIDERS: { id: ProviderId; label: string }[] = [
 	{ id: "claude-sub", label: "Claude 구독 (Claude Code 로그인)" },
@@ -60,6 +61,7 @@ function ModelInput({
 }
 
 export function SettingsTab() {
+	const character = useCharacter();
 	const [s, setS] = useState<AppSettings | null>(null);
 	const [claudeKey, setClaudeKey] = useState("");
 	const [openaiKey, setOpenaiKey] = useState("");
@@ -307,7 +309,7 @@ export function SettingsTab() {
 			<Section title="웹 검색 (TinyFish)">
 				<label className="flex items-center gap-2">
 					<input type="checkbox" checked={s.search.enabled} onChange={(e) => patch((d) => (d.search.enabled = e.target.checked))} />
-					웹 검색 사용 (필요할 때 잉키가 알아서 검색, 🔎를 켜면 항상 검색)
+					웹 검색 사용 (필요할 때 캐릭터가 알아서 검색, 🔎를 켜면 항상 검색)
 				</label>
 				<Field label="TinyFish API 키" hint="agent.tinyfish.ai/api-keys 에서 만들 수 있어. 검색은 무료야.">
 					<div className="flex gap-2">
@@ -345,7 +347,7 @@ export function SettingsTab() {
 				</div>
 			</Section>
 
-			<Section title="잉키의 말 걸기">
+			<Section title={`${character.name}의 말 걸기`}>
 				<label className="flex items-center gap-2">
 					<input type="checkbox" checked={s.proactive.enabled} onChange={(e) => patch((d) => (d.proactive.enabled = e.target.checked))} />
 					가끔 먼저 격려하거나 말 걸기
@@ -369,10 +371,6 @@ export function SettingsTab() {
 			</Section>
 
 			<Section title="대화">
-				<label className="flex items-center gap-2">
-					<input type="checkbox" checked={s.attachScreenByDefault} onChange={(e) => patch((d) => (d.attachScreenByDefault = e.target.checked))} />
-					질문할 때 현재 화면을 기본으로 첨부
-				</label>
 				<div className="flex items-center gap-4">
 					<span className="text-xs text-slate-500">말투</span>
 					{(

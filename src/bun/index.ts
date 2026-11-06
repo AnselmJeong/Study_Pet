@@ -8,17 +8,21 @@ import {
 	Tray,
 	Utils,
 } from "electrobun/main";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { StudyPetRPC } from "../shared/rpc";
 import type { ChatMessage, PetMood } from "../shared/types";
 import * as chat from "./chat";
 import * as context from "./context";
 import { hasScreenPermission, requestScreenPermission } from "./capture";
+import * as attach from "./attachments";
+import { currentCharacter } from "./character";
+import { vocative } from "../shared/character";
+import { supportsVision } from "./llm/router";
 import { testSearch } from "./search";
 import { CLAUDE_MODELS, claudeTest } from "./llm/claudeSub";
 import { listModels, testConnection } from "./llm/openaiCompat";
-import { claudeApiKey, getSettings, openaiApiKey, saveSettings, setPetPackId } from "./settings";
+import { claudeApiKey, dataDir, getSettings, openaiApiKey, saveSettings, setPetPackId } from "./settings";
 import * as packs from "./packs";
 import { INKY_ID, PACK_ID } from "../shared/pack";
 
@@ -102,12 +106,34 @@ function makeRPC() {
 		maxRequestTime: 120_000,
 		handlers: {
 			requests: {
-				ask: async ({ text, attachScreen, webSearch }) => {
+				ask: async ({ text, attachments, webSearch }) => {
 					const t = text.trim();
-					if (!t) return { accepted: false, reason: "빈 질문" };
+					const ids = (attachments ?? []).slice(0, attach.MAX_ATTACHMENTS);
+					if (!t && !ids.length) return { accepted: false, reason: "빈 질문" };
 					if (chat.isBusy()) return { accepted: false, reason: "이전 답을 쓰는 중이야" };
-					void chat.ask(t, attachScreen, chatEvents, webSearch ?? false);
+					const files = ids.map((id) => ({ id, path: attach.attachmentPath(id) }));
+					if (files.some((f) => !f.path)) {
+						return { accepted: false, reason: "첨부 이미지가 사라졌어 (오래돼서 정리됨). ✕로 빼고 다시 붙여 줘" };
+					}
+					if (files.length && !supportsVision("chat")) {
+						return {
+							accepted: false,
+							reason: "지금 대화 모델은 이미지를 못 봐. 설정 → 대화에서 '비전(이미지) 지원'을 켜거나 Claude 구독으로 바꿔 줘",
+						};
+					}
+					void chat.ask(t || "이 이미지 봐 줘", files as { id: string; path: string }[], chatEvents, webSearch ?? false);
 					return { accepted: true };
+				},
+				addAttachment: ({ data, mime }) => attach.addFromData(data, mime),
+				captureAttachment: ({ mode, from }) => captureForAttach(mode, from),
+				discardAttachment: ({ id }) => {
+					attach.discard(id);
+					return { ok: true };
+				},
+				openScreenSettings: () => {
+					requestScreenPermission();
+					Utils.screenCapture.openSettings();
+					return { ok: true };
 				},
 				cancel: () => ({ ok: chat.cancel() }),
 				getHistory: () => chat.getHistory(),
@@ -162,10 +188,20 @@ function makeRPC() {
 					// 앱 기본 팩(요미 등)은 WebView만 알고 있으므로 형식만 검사한다. 잘못된 id면 잉키로
 					const s = setPetPackId(id === INKY_ID || PACK_ID.test(id) ? id : INKY_ID);
 					send("settingsChanged", s);
+					characterChanged();
 					return s;
 				},
-				importPack: () => packs.importPackFromDialog(),
-				removePack: ({ id }) => ({ ok: packs.removePack(id) }),
+				importPack: async () => {
+					const r = await packs.importPackFromDialog();
+					characterChanged(); // 지금 쓰는 팩을 다시 가져왔을 수도 있다
+					return r;
+				},
+				removePack: ({ id }) => {
+					const ok = packs.removePack(id);
+					characterChanged();
+					return { ok };
+				},
+				getCharacter: () => currentCharacter(),
 				openPacksFolder: () => {
 					packs.openPacksFolder();
 					return { ok: true };
@@ -249,7 +285,7 @@ function openPanel(tab: "chat" | "timeline" | "settings") {
 	const width = 440;
 	const height = Math.min(680, wa.height - 2 * MARGIN);
 	panelWin = new BrowserWindow({
-		title: APP_NAME,
+		title: panelTitle(),
 		url: `views://app/panel/index.html#${tab}`,
 		titleBarStyle: "hiddenInset",
 		frame: {
@@ -263,6 +299,64 @@ function openPanel(tab: "chat" | "timeline" | "settings") {
 	panelWin.on("close", () => {
 		panelWin = null;
 	});
+}
+
+// ---------- 캐릭터 이름 ----------
+
+function panelTitle() {
+	return `${currentCharacter().name} · ${APP_NAME}`;
+}
+
+/** 캐릭터가 바뀌면 메뉴, 패널 제목, 창들의 이름 표시를 바로 바꾼다 */
+function characterChanged() {
+	const c = currentCharacter();
+	send("characterChanged", c);
+	updateTrayMenu();
+	try {
+		panelWin?.setTitle(panelTitle());
+	} catch {}
+}
+
+// ---------- 첨부용 화면 캡처 ----------
+
+let attachCapturing = false;
+
+/** 펫(과 패널)을 숨기고 찍은 다음, 원래대로 보이게 한다 */
+async function captureForAttach(mode: "screen" | "region", from: "pet" | "panel") {
+	if (attachCapturing) return { ok: false as const, reason: "failed" as const, message: "이미 찍는 중이야" };
+	attachCapturing = true;
+	try {
+		return await attach.addFromCapture(mode, async () => {
+			const petShown = Boolean(petWin?.isVisible());
+			const panelShown = Boolean(panelWin?.isVisible());
+			petWin?.hide();
+			panelWin?.hide();
+			await Bun.sleep(250); // 창이 실제로 사라질 때까지
+			return () => {
+				if (petShown && petWin) {
+					petWin.show();
+					petWin.setAlwaysOnTop(true);
+				}
+				if (panelShown && panelWin) panelWin.show();
+				(from === "panel" && panelShown ? panelWin : petWin)?.focus();
+			};
+		});
+	} finally {
+		attachCapturing = false;
+	}
+}
+
+/** 트레이·우클릭 "영역 찍어서 물어보기": 찍은 그림을 펫 입력창에 붙이고 연다 */
+async function regionAsk() {
+	if (!petWin) createPetWindow();
+	const r = await captureForAttach("region", "pet");
+	if (r.ok) {
+		send("attachmentAdded", r.attachment, "pet");
+		focusPetInput();
+	} else if (r.reason === "permission" || r.reason === "failed") {
+		send("attachmentError", { reason: r.reason, message: r.message ?? "캡처 실패" }, "pet");
+		focusPetInput();
+	}
 }
 
 // ---------- 메뉴, 트레이, 단축키 ----------
@@ -305,11 +399,13 @@ function updateTrayIcon() {
 
 function updateTrayMenu() {
 	const running = context.getState().running;
+	const name = currentCharacter().name;
 	updateTrayIcon();
 	tray.setMenu([
-		{ type: "normal", label: "잉키에게 물어보기 (⌥Space)", action: "ask" },
-		{ type: "normal", label: "잉키 불러오기 (오른쪽 아래로)", action: "summon" },
-		{ type: "normal", label: "잉키야, 한마디 해 줘", action: "speak" },
+		{ type: "normal", label: `${name}에게 물어보기 (⌥Space)`, action: "ask" },
+		{ type: "normal", label: "영역 찍어서 물어보기", action: "region-ask" },
+		{ type: "normal", label: `${name} 불러오기 (오른쪽 아래로)`, action: "summon" },
+		{ type: "normal", label: `${vocative(name)}, 한마디 해 줘`, action: "speak" },
 		{ type: "normal", label: running ? "공부 세션 끝내기 (화면 기록 중지)" : "공부 세션 시작 (1분마다 화면 기록)", action: "toggle-session" },
 		{ type: "divider" },
 		{ type: "normal", label: "대화 패널", action: "panel" },
@@ -329,6 +425,9 @@ function runMenuAction(action: string | undefined) {
 	switch (action) {
 		case "ask":
 			focusPetInput();
+			break;
+		case "region-ask":
+			void regionAsk();
 			break;
 		case "summon":
 			summonPet();
@@ -375,6 +474,7 @@ tray.on("tray-clicked", (event: any) => runMenuAction(event?.data?.action));
 
 function showAppContextMenu(_where: "pet" | "panel", editable: boolean, hasSelection: boolean) {
 	const running = context.getState().running;
+	const name = currentCharacter().name;
 	const edit: any[] =
 		editable || hasSelection
 			? [
@@ -388,13 +488,14 @@ function showAppContextMenu(_where: "pet" | "panel", editable: boolean, hasSelec
 	ContextMenu.showContextMenu([
 		...edit,
 		{ type: "normal", label: "물어보기 (⌥Space)", action: "ask" },
+		{ type: "normal", label: "영역 찍어서 물어보기", action: "region-ask" },
 		{ type: "normal", label: "대화 패널", action: "panel" },
 		{ type: "normal", label: "화면 기록 타임라인", action: "timeline" },
 		{ type: "normal", label: "설정", action: "settings" },
 		{ type: "divider" },
 		{ type: "normal", label: running ? "공부 세션 끝내기" : "공부 세션 시작", action: "toggle-session" },
-		{ type: "normal", label: "잉키야, 한마디 해 줘", action: "speak" },
-		{ type: "normal", label: "잉키 불러오기 (오른쪽 아래로)", action: "summon" },
+		{ type: "normal", label: `${vocative(name)}, 한마디 해 줘`, action: "speak" },
+		{ type: "normal", label: `${name} 불러오기 (오른쪽 아래로)`, action: "summon" },
 		{ type: "divider" },
 		{ type: "normal", label: "Inky에 관하여", action: "about" },
 		{ type: "normal", label: "종료", action: "quit" },
@@ -439,6 +540,24 @@ try {
 }
 
 createPetWindow();
+
+// 화면 기록 권한이 없으면 (재설치하면 ad-hoc 서명이 바뀌어 권한이 풀린다) 한 번 알려 준다
+const screenOk = hasScreenPermission();
+console.log(`[study-pet] 화면 기록 권한: ${screenOk ? "있음" : "없음"}`);
+try {
+	// 진단용: 실행할 때마다 권한 상태를 남긴다 (userData/inky.log, 200줄 넘으면 앞부분 버림)
+	const logPath = join(dataDir, "inky.log");
+	const prev = existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n").filter(Boolean).slice(-199) : [];
+	writeFileSync(logPath, [...prev, `${new Date().toISOString()} start v${appVersion()} screenPermission=${screenOk}`].join("\n") + "\n");
+} catch {}
+if (!screenOk) {
+	setTimeout(() => {
+		const line =
+			"화면 기록 권한이 꺼져 있어서 지금은 화면을 못 봐. 시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음에서 Inky를 껐다 켜고 앱을 다시 실행해 줘. (메뉴바 🖋️ → 화면 기록 권한 확인)";
+		chat.addPetLine(line, chatEvents);
+		send("petSays", { text: line, kind: "nudge" });
+	}, 2500);
+}
 
 const s = getSettings();
 if (s.chatProvider === "openai-compat" && !s.openai.chatModel) {

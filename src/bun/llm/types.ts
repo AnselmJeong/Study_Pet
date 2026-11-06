@@ -21,4 +21,6 @@ export type CompleteRequest = {
 	signal?: AbortSignal;
 	maxTokens?: number;
 	tools?: AppTool[];
+	/** 이전 대화를 한 덩어리로 넘길 때 쓰는 캐릭터 이름 */
+	assistantName?: string;
 };

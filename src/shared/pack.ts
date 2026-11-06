@@ -67,6 +67,10 @@ export type PackManifest = {
 	height?: number;
 	fps?: number;
 	motion?: boolean;
+	/** 캐릭터 소개 (대화 프롬프트에 들어감). 없으면 이름만 바꾼 기본 성격 */
+	persona?: string;
+	/** 말투 지시 (예: "느긋하고 다정한 반말, 가끔 차 이야기") */
+	speech?: string;
 	states: Partial<Record<PackStateName, PackStateSpec>>;
 };
 

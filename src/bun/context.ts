@@ -5,6 +5,8 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Activity, CaptureState, PetMood, Relevance, TimelineEntry } from "../shared/types";
+import { currentCharacter } from "./character";
+import { personaLines } from "./llm/prompt";
 import { captureScreen, deleteShot, fingerprint, fingerprintDiff, frontmostApp, idleSeconds, screenLocked } from "./capture";
 import { complete, supportsVision } from "./llm/router";
 import { dataDir, getSettings } from "./settings";
@@ -97,6 +99,8 @@ export function start(goal: string) {
 	lastFp = null;
 	state.goal = goal.trim();
 	state.startedAt = Date.now();
+	captureFailures = 0;
+	warnedCaptureFail = false;
 	ev?.captureState(getState());
 	ev?.mood("focus");
 	void tick(); // 바로 첫 캡처
@@ -156,6 +160,9 @@ function pauseUntilActive(reason: "idle" | "lock") {
 	}, 5_000);
 }
 
+let captureFailures = 0;
+let warnedCaptureFail = false;
+
 async function tick() {
 	if (!state.running || state.paused) return;
 	if (capturing) return scheduleNext();
@@ -182,8 +189,19 @@ async function tick() {
 		const shot = await captureScreen();
 		if (!shot) {
 			addEntry({ ...base, relevance: "unknown", summary: "캡처 실패 (화면 기록 권한 확인)", skipped: "no-permission" });
+			captureFailures++;
+			// 연속으로 실패하면 타임라인에만 남기지 말고 펫이 직접 알려 준다 (세션마다 한 번)
+			if (captureFailures >= 3 && !warnedCaptureFail) {
+				warnedCaptureFail = true;
+				ev?.mood("error");
+				ev?.petSays(
+					"화면 캡처가 계속 실패하고 있어. 화면 기록 권한이 꺼진 것 같아 → 시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음에서 Inky를 껐다 켜고 앱을 다시 실행해 줘.",
+					"nudge",
+				);
+			}
 			return;
 		}
+		captureFailures = 0;
 
 		// 화면 변화 비교
 		const fp = await fingerprint(shot.path);
@@ -356,7 +374,8 @@ async function speak(kind: "encourage" | "joke" | "break" | "nudge", extra: stri
 		ev?.mood("thinking");
 		const text = await complete("summary", {
 			system: [
-				"너는 사용자의 화면 구석에 사는 잉크 방울 요정 '잉키'다. 사용자의 공부를 옆에서 응원한다.",
+				...personaLines(currentCharacter()),
+				"지금은 사용자의 공부를 옆에서 응원하는 한마디를 건넨다.",
 				s.tone === "banmal" ? "반말로 친근하게 말한다." : "존댓말로 다정하게 말한다.",
 				"말풍선에 들어갈 한두 문장만 출력한다. 따옴표나 머리말 없이 본문만.",
 				"퀴즈를 내거나 학습 내용을 확인하는 질문은 하지 않는다. 죄책감을 주는 표현은 쓰지 않는다.",

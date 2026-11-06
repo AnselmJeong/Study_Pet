@@ -81,7 +81,7 @@ function childEnv(apiKey: string | null): Record<string, string | undefined> {
 function transcript(req: CompleteRequest): string {
 	if (!req.history.length) return req.userText;
 	const past = req.history
-		.map((t) => `${t.role === "user" ? "사용자" : "잉키"}: ${t.text}`)
+		.map((t) => `${t.role === "user" ? "사용자" : (req.assistantName ?? "어시스턴트")}: ${t.text}`)
 		.join("\n\n");
 	return `<이전_대화>\n${past}\n</이전_대화>\n\n${req.userText}`;
 }

@@ -3,6 +3,8 @@ import type { CaptureState, PetAction, PetMood } from "../../shared/types";
 import { PetCharacter } from "../common/PetCharacter";
 import { api, on } from "../common/rpc";
 import { useChat } from "../common/useChat";
+import { useCharacter } from "../common/useCharacter";
+import { AttachStrip, CaptureButtons, useAttachments } from "../common/attachments";
 
 const BUBBLE_HIDE_MS = 15_000;
 const PAD = 8;
@@ -56,7 +58,6 @@ export function PetApp() {
 	const [action, setAction] = useState<PetAction>("none");
 	const [inputOpen, setInputOpen] = useState(false);
 	const [text, setText] = useState("");
-	const [attach, setAttach] = useState(true);
 	const [search, setSearch] = useState(false);
 	const [bubbleVisible, setBubbleVisible] = useState(false);
 	const [hint, setHint] = useState<string | null>(null);
@@ -69,10 +70,16 @@ export function PetApp() {
 	const down = useRef({ x: 0, y: 0 });
 	const walkDir = useRef<1 | -1>(-1);
 
+	const openInput = () => {
+		setInputOpen(true);
+		setTimeout(() => inputRef.current?.focus(), 30);
+	};
+	const att = useAttachments({ from: "pet", onIncoming: openInput });
+	const character = useCharacter();
+
 	const last = [...messages].reverse().find((m) => m.role === "assistant");
 
 	useEffect(() => {
-		api.getSettings({}).then((s) => setAttach(s.attachScreenByDefault)).catch(() => {});
 		api.getCaptureState({}).then(setCapture).catch(() => {});
 		const offs = [
 			on("mood", ({ mood }) => setMood(mood)),
@@ -80,7 +87,6 @@ export function PetApp() {
 				setInputOpen(true);
 				setTimeout(() => inputRef.current?.focus(), 30);
 			}),
-			on("settingsChanged", (s) => setAttach(s.attachScreenByDefault)),
 			on("messageAdded", (m) => {
 				if (m.role === "assistant") {
 					setBubbleVisible(true);
@@ -139,11 +145,12 @@ export function PetApp() {
 
 	async function submit() {
 		const t = text.trim();
-		if (!t) return;
-		const res = await api.ask({ text: t, attachScreen: attach, webSearch: search });
+		if (!t && !att.ids.length) return;
+		const res = await api.ask({ text: t, attachments: att.ids, webSearch: search });
 		if (res.accepted) {
 			setText("");
 			setHint(null);
+			att.sent();
 		} else setHint(res.reason ?? "지금은 보낼 수 없어");
 	}
 
@@ -241,8 +248,9 @@ export function PetApp() {
 							ref={inputRef}
 							value={text}
 							rows={2}
-							placeholder="잉키에게 물어봐… (Enter 보내기, Esc 닫기)"
+							placeholder={`${character.name}에게 물어봐… (이미지 붙여넣기·끌어놓기 OK)`}
 							onChange={(e) => setText(e.target.value)}
+							onPaste={att.onPaste}
 							onKeyDown={(e) => {
 								if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 								if (e.key === "Enter" && !e.shiftKey) {
@@ -254,17 +262,15 @@ export function PetApp() {
 							}}
 							className="w-full resize-none bg-transparent text-[13px] text-white placeholder:text-slate-400 outline-none"
 						/>
+						<AttachStrip a={att} dark />
+						{hint && <div className="text-[11px] text-amber-300">{hint}</div>}
 						<div className="flex items-center justify-between text-[11px] text-slate-300">
-							<label className="flex cursor-pointer items-center gap-1" title="질문할 때 현재 화면을 캡처해서 함께 보냄">
-								<input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
-								📷 화면
-							</label>
+							<CaptureButtons a={att} dark />
 							<label className="flex cursor-pointer items-center gap-1" title="답하기 전에 웹 검색을 먼저 함 (꺼 둬도 필요하면 알아서 검색)">
 								<input type="checkbox" checked={search} onChange={(e) => setSearch(e.target.checked)} />
-								🔎 검색
+								🔎
 							</label>
 							<div className="flex items-center gap-2">
-								{hint && <span className="text-amber-300">{hint}</span>}
 								<button onClick={() => api.openPanel({ tab: "timeline" })} className="text-slate-400 hover:text-white" title="화면 기록">
 									🕘
 								</button>
@@ -273,7 +279,7 @@ export function PetApp() {
 								</button>
 								<button
 									onClick={() => void submit()}
-									disabled={busy || !text.trim()}
+									disabled={busy || att.working || (!text.trim() && !att.ids.length)}
 									className="rounded-full bg-indigo-500 px-3 py-0.5 text-white disabled:opacity-40"
 								>
 									보내기
