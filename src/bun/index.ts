@@ -10,9 +10,11 @@ import {
 import type { StudyPetRPC } from "../shared/rpc";
 import type { ChatMessage, PetMood } from "../shared/types";
 import * as chat from "./chat";
+import * as context from "./context";
 import { hasScreenPermission, requestScreenPermission } from "./capture";
+import { CLAUDE_MODELS, claudeTest } from "./llm/claudeSub";
 import { listModels, testConnection } from "./llm/openaiCompat";
-import { getSettings, resolveApiKey, saveSettings } from "./settings";
+import { claudeApiKey, getSettings, openaiApiKey, saveSettings } from "./settings";
 
 const PET_COMPACT = { width: 150, height: 170 };
 const MARGIN = 24;
@@ -48,6 +50,20 @@ const chatEvents: chat.ChatEvents = {
 	mood: (mood: PetMood) => send("mood", { mood }),
 };
 
+context.init({
+	timelineAdded: (e) => send("timelineAdded", e),
+	captureState: (st) => {
+		send("captureState", st);
+		updateTrayMenu();
+	},
+	petSays: (text, kind) => {
+		chat.addPetLine(text, chatEvents);
+		send("petSays", { text, kind });
+	},
+	mood: (mood) => send("mood", { mood }),
+	isChatBusy: () => chat.isBusy(),
+});
+
 // ---------- RPC ----------
 
 function makeRPC() {
@@ -70,14 +86,20 @@ function makeRPC() {
 					return { ok: true };
 				},
 				getSettings: () => getSettings(),
-				saveSettings: ({ settings, apiKey }) => {
-					const s = saveSettings(settings, apiKey);
+				saveSettings: ({ settings, apiKeys }) => {
+					const s = saveSettings(settings, apiKeys);
+					context.rescheduleProactive();
 					send("settingsChanged", s);
 					return s;
 				},
-				listModels: ({ provider, apiKey }) => listModels(provider, resolveApiKey(provider, apiKey)),
-				testConnection: ({ provider, apiKey }) =>
-					testConnection(provider, resolveApiKey(provider, apiKey)),
+				listModels: async ({ provider, settings, apiKey }) =>
+					provider === "claude-sub"
+						? { ok: true, models: CLAUDE_MODELS }
+						: listModels(settings.openai, openaiApiKey(settings.openai, apiKey)),
+				testConnection: ({ provider, settings, apiKey }) =>
+					provider === "claude-sub"
+						? claudeTest(settings.claude, claudeApiKey(apiKey))
+						: testConnection(settings.openai, openaiApiKey(settings.openai, apiKey)),
 				getScreenPermission: () => ({ granted: hasScreenPermission() }),
 				requestScreenPermission: () => ({ granted: requestScreenPermission() }),
 				openPanel: ({ tab }) => {
@@ -88,7 +110,20 @@ function makeRPC() {
 					resizePet(width, height);
 					return { ok: true };
 				},
-				petClicked: () => ({ ok: true }),
+				walkPet: async ({ dx, durationMs }) => {
+					await walkPet(dx, durationMs);
+					return { ok: true };
+				},
+				getCaptureState: () => context.getState(),
+				startCapture: ({ goal }) => {
+					context.start(goal);
+					return context.getState();
+				},
+				stopCapture: () => {
+					context.stop();
+					return context.getState();
+				},
+				getTimeline: () => context.getTimeline(),
 			},
 			messages: {},
 		},
@@ -127,9 +162,29 @@ function resizePet(width: number, height: number) {
 	petWin.setFrame(f.x + f.width - w, f.y + f.height - h, w, h);
 }
 
+let walking = false;
+async function walkPet(dx: number, durationMs: number) {
+	if (!petWin || walking) return;
+	walking = true;
+	try {
+		const wa = Screen.getPrimaryDisplay().workArea;
+		const f = petWin.getFrame();
+		const target = Math.max(wa.x, Math.min(wa.x + wa.width - f.width, f.x + dx));
+		const steps = Math.max(1, Math.round(Math.min(durationMs, 4000) / 33));
+		for (let i = 1; i <= steps; i++) {
+			if (!petWin) break;
+			const cur = petWin.getFrame();
+			petWin.setPosition(Math.round(f.x + ((target - f.x) * i) / steps), cur.y);
+			await Bun.sleep(33);
+		}
+	} finally {
+		walking = false;
+	}
+}
+
 // ---------- 패널 창 ----------
 
-function openPanel(tab: "chat" | "settings") {
+function openPanel(tab: "chat" | "timeline" | "settings") {
 	if (panelWin) {
 		panelWin.show();
 		panelWin.focus();
@@ -175,22 +230,39 @@ ApplicationMenu.setApplicationMenu([
 ]);
 
 const tray = new Tray({ title: "🖋️" });
-tray.setMenu([
-	{ type: "normal", label: "잉키에게 물어보기 (⌥Space)", action: "ask" },
-	{ type: "normal", label: "대화 패널 열기", action: "panel" },
-	{ type: "normal", label: "설정", action: "settings" },
-	{ type: "divider" },
-	{ type: "normal", label: "화면 기록 권한 확인", action: "permission" },
-	{ type: "divider" },
-	{ type: "normal", label: "종료", action: "quit" },
-]);
+
+function updateTrayMenu() {
+	const running = context.getState().running;
+	tray.setTitle(running ? "🖋️●" : "🖋️");
+	tray.setMenu([
+		{ type: "normal", label: "잉키에게 물어보기 (⌥Space)", action: "ask" },
+		{ type: "normal", label: running ? "공부 세션 끝내기 (화면 기록 중지)" : "공부 세션 시작 (1분마다 화면 기록)", action: "toggle-session" },
+		{ type: "divider" },
+		{ type: "normal", label: "대화 패널", action: "panel" },
+		{ type: "normal", label: "화면 기록 타임라인", action: "timeline" },
+		{ type: "normal", label: "설정", action: "settings" },
+		{ type: "divider" },
+		{ type: "normal", label: "화면 기록 권한 확인", action: "permission" },
+		{ type: "divider" },
+		{ type: "normal", label: "종료", action: "quit" },
+	]);
+}
+updateTrayMenu();
+
 tray.on("tray-clicked", (event: any) => {
 	switch (event?.data?.action) {
 		case "ask":
 			focusPetInput();
 			break;
+		case "toggle-session":
+			if (context.getState().running) context.stop();
+			else context.start("");
+			break;
 		case "panel":
 			openPanel("chat");
+			break;
+		case "timeline":
+			openPanel("timeline");
 			break;
 		case "settings":
 			openPanel("settings");
@@ -206,6 +278,7 @@ tray.on("tray-clicked", (event: any) => {
 			break;
 		}
 		case "quit":
+			context.stop();
 			tray.remove();
 			Utils.quit();
 			break;
@@ -229,8 +302,7 @@ console.log(`[study-pet] 단축키: ${shortcut ?? "등록 실패"}`);
 createPetWindow();
 
 const s = getSettings();
-if (!s.provider.model) {
-	// 첫 실행: 설정부터
+if (s.chatProvider === "openai-compat" && !s.openai.chatModel) {
 	setTimeout(() => openPanel("settings"), 800);
 }
 console.log("[study-pet] 시작됨");

@@ -1,7 +1,8 @@
 // OpenAI 호환 Chat Completions 클라이언트 (Ollama Cloud / 로컬 Ollama / 기타).
 // 외부 SDK 없이 fetch + SSE 파싱으로 구현한다.
 
-import type { ModelInfo, ProviderSettings, TestResult } from "../../shared/types";
+import type { ModelInfo, OpenAISettings, TestResult } from "../../shared/types";
+import type { CompleteRequest } from "./types";
 
 export type ContentPart =
 	| { type: "text"; text: string }
@@ -18,7 +19,7 @@ function headers(apiKey: string | null): Record<string, string> {
 	return h;
 }
 
-function base(p: ProviderSettings): string {
+function base(p: OpenAISettings): string {
 	return p.baseUrl.trim().replace(/\/+$/, "");
 }
 
@@ -34,7 +35,7 @@ async function errorText(res: Response): Promise<string> {
 
 /** /v1/models → 실패 시 Ollama 네이티브 /api/tags 로 대체 */
 export async function listModels(
-	p: ProviderSettings,
+	p: OpenAISettings,
 	apiKey: string | null,
 ): Promise<{ ok: boolean; models: ModelInfo[]; detail?: string }> {
 	try {
@@ -64,7 +65,8 @@ export async function listModels(
  * 스트리밍 채팅. onDelta로 조각을 넘기고 최종 텍스트를 반환한다.
  */
 export async function streamChat(opts: {
-	provider: ProviderSettings;
+	provider: OpenAISettings;
+	model: string;
 	apiKey: string | null;
 	messages: OAIMessage[];
 	onDelta: (delta: string) => void;
@@ -76,7 +78,7 @@ export async function streamChat(opts: {
 		headers: headers(opts.apiKey),
 		signal: opts.signal,
 		body: JSON.stringify({
-			model: opts.provider.model,
+			model: opts.model,
 			messages: opts.messages,
 			stream: true,
 			max_tokens: opts.maxTokens ?? 2048,
@@ -120,12 +122,13 @@ export async function streamChat(opts: {
 const TEST_IMAGE =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGO4q6REU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULANL8hD3ndtChAAAAAElFTkSuQmCC";
 
-export async function testConnection(p: ProviderSettings, apiKey: string | null): Promise<TestResult> {
+export async function testConnection(p: OpenAISettings, apiKey: string | null): Promise<TestResult> {
 	if (!p.baseUrl) return { ok: false, detail: "Base URL이 비어 있어요." };
-	if (!p.model) return { ok: false, detail: "모델을 먼저 골라 주세요." };
+	if (!p.chatModel) return { ok: false, detail: "모델을 먼저 골라 주세요." };
 	try {
 		const text = await streamChat({
 			provider: p,
+			model: p.chatModel,
 			apiKey,
 			maxTokens: 20,
 			messages: [{ role: "user", content: "Reply with exactly: OK" }],
@@ -136,6 +139,7 @@ export async function testConnection(p: ProviderSettings, apiKey: string | null)
 		try {
 			const v = await streamChat({
 				provider: p,
+				model: p.chatModel,
 				apiKey,
 				maxTokens: 20,
 				messages: [
@@ -158,4 +162,34 @@ export async function testConnection(p: ProviderSettings, apiKey: string | null)
 	} catch (err) {
 		return { ok: false, detail: String(err).slice(0, 300) };
 	}
+}
+
+/** 공통 요청 형식 → OpenAI 호환 메시지 */
+export async function openaiComplete(o: OpenAISettings, apiKey: string | null, req: CompleteRequest): Promise<string> {
+	if (!o.baseUrl) throw new Error("OpenAI 호환 Base URL이 비어 있어요.");
+	if (!req.model) throw new Error("OpenAI 호환 모델이 설정되지 않았어요.");
+	let content: string | ContentPart[] = req.userText;
+	if (req.images.length && o.vision) {
+		content = [{ type: "text", text: req.userText }];
+		for (const path of req.images) {
+			const bytes = await Bun.file(path).arrayBuffer();
+			content.push({
+				type: "image_url",
+				image_url: { url: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}` },
+			});
+		}
+	}
+	return streamChat({
+		provider: o,
+		model: req.model,
+		apiKey,
+		signal: req.signal,
+		maxTokens: req.maxTokens,
+		onDelta: req.onDelta ?? (() => {}),
+		messages: [
+			{ role: "system", content: req.system },
+			...req.history.map((t) => ({ role: t.role, content: t.text }) as OAIMessage),
+			{ role: "user", content },
+		],
+	});
 }

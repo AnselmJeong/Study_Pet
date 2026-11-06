@@ -1,15 +1,19 @@
 import type { RPCSchema } from "electrobun/main";
 import type {
 	AppSettings,
+	CaptureState,
 	ChatMessage,
 	ModelInfo,
 	PetMood,
-	ProviderSettings,
+	ProviderId,
 	ScreenPermission,
 	TestResult,
+	TimelineEntry,
 } from "./types";
 
-/** 펫 창과 패널 창이 같은 스키마를 쓴다 (둘 다 같은 메시지를 받는다) */
+type Tab = "chat" | "timeline" | "settings";
+
+/** 펫 창과 패널 창이 같은 스키마를 쓴다 */
 export type StudyPetRPC = {
 	bun: RPCSchema<{
 		requests: {
@@ -21,45 +25,47 @@ export type StudyPetRPC = {
 			getHistory: { params: {}; response: ChatMessage[] };
 			clearHistory: { params: {}; response: { ok: boolean } };
 			getSettings: { params: {}; response: AppSettings };
+			/** apiKeys: undefined = 그대로, null/"" = 삭제, 문자열 = 저장 */
 			saveSettings: {
-				params: { settings: AppSettings; apiKey?: string | null };
+				params: { settings: AppSettings; apiKeys?: { claude?: string | null; openai?: string | null } };
 				response: AppSettings;
 			};
 			listModels: {
-				params: { provider: ProviderSettings; apiKey?: string | null };
+				params: { provider: ProviderId; settings: AppSettings; apiKey?: string | null };
 				response: { ok: boolean; models: ModelInfo[]; detail?: string };
 			};
 			testConnection: {
-				params: { provider: ProviderSettings; apiKey?: string | null };
+				params: { provider: ProviderId; settings: AppSettings; apiKey?: string | null };
 				response: TestResult;
 			};
 			getScreenPermission: { params: {}; response: ScreenPermission };
 			requestScreenPermission: { params: {}; response: ScreenPermission };
-			openPanel: { params: { tab?: "chat" | "settings" }; response: { ok: boolean } };
-			resizePet: {
-				params: { width: number; height: number };
-				response: { ok: boolean };
-			};
-			petClicked: { params: {}; response: { ok: boolean } };
+			openPanel: { params: { tab?: Tab }; response: { ok: boolean } };
+			resizePet: { params: { width: number; height: number }; response: { ok: boolean } };
+			/** 펫 창을 옆으로 천천히 이동 (걷기 행동). 화면 밖으로는 안 나감 */
+			walkPet: { params: { dx: number; durationMs: number }; response: { ok: boolean } };
+			getCaptureState: { params: {}; response: CaptureState };
+			startCapture: { params: { goal: string }; response: CaptureState };
+			stopCapture: { params: {}; response: CaptureState };
+			getTimeline: { params: {}; response: TimelineEntry[] };
 		};
 		messages: {};
 	}>;
 	webview: RPCSchema<{
 		requests: {};
 		messages: {
-			/** 새 메시지(사용자 질문 또는 빈 assistant 메시지)가 생겼을 때 */
 			messageAdded: ChatMessage;
-			/** assistant 메시지 스트리밍 조각 */
 			messageDelta: { id: string; delta: string };
-			/** assistant 메시지 완료 (최종 텍스트 포함) */
 			messageDone: { id: string; text: string; error?: boolean };
 			historyCleared: {};
 			mood: { mood: PetMood };
-			/** 펫 창에서 입력창을 열라는 신호 (전역 단축키) */
 			focusInput: {};
-			/** 패널에서 보여줄 탭 */
-			showTab: { tab: "chat" | "settings" };
+			showTab: { tab: Tab };
 			settingsChanged: AppSettings;
+			captureState: CaptureState;
+			timelineAdded: TimelineEntry;
+			/** 펫이 먼저 건네는 말 (격려, 농담, 휴식 권유) */
+			petSays: { text: string; kind: "encourage" | "joke" | "break" | "nudge" };
 		};
 	}>;
 };

@@ -1,7 +1,7 @@
 import { Utils } from "electrobun/main";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppSettings, ProviderPreset, ProviderSettings } from "../shared/types";
+import type { AppSettings, OpenAIPreset, OpenAISettings } from "../shared/types";
 import { deleteApiKey, getApiKey, setApiKey } from "./keychain";
 
 export const dataDir = Utils.paths.userData;
@@ -9,72 +9,113 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
 const settingsPath = join(dataDir, "settings.json");
 
-export const PRESET_BASE_URL: Record<ProviderPreset, string> = {
+export const OPENAI_PRESET_URL: Record<OpenAIPreset, string> = {
 	"ollama-cloud": "https://ollama.com/v1",
-	"ollama-local": "http://localhost:11434/v1",
 	custom: "",
 };
 
-/** Keychain 계정 이름: 프리셋별로 키를 따로 저장 */
-export function keyAccount(p: Pick<ProviderSettings, "preset" | "baseUrl">): string {
-	return p.preset === "custom" ? `custom:${p.baseUrl}` : p.preset;
+const CLAUDE_ACCOUNT = "claude-api";
+export function openaiAccount(o: Pick<OpenAISettings, "preset" | "baseUrl">): string {
+	return o.preset === "custom" ? `custom:${o.baseUrl}` : o.preset;
 }
 
 const defaults: AppSettings = {
-	provider: {
+	chatProvider: "claude-sub",
+	summaryProvider: "claude-sub",
+	claude: { chatModel: "sonnet", summaryModel: "sonnet", cliPath: "", hasApiKey: false },
+	openai: {
 		preset: "ollama-cloud",
-		baseUrl: PRESET_BASE_URL["ollama-cloud"],
-		model: "",
+		baseUrl: OPENAI_PRESET_URL["ollama-cloud"],
+		chatModel: "",
+		summaryModel: "",
 		vision: true,
 		hasApiKey: false,
 	},
+	capture: {
+		intervalSec: 60,
+		maxShots: 20,
+		excludedApps: ["1Password", "Keychain Access", "키체인 접근", "KakaoTalk", "카카오톡", "Messages", "메시지", "Slack", "System Settings", "시스템 설정"],
+		idleSkipSec: 120,
+		retentionMin: 60,
+	},
+	proactive: { enabled: true, minIntervalMin: 12, maxIntervalMin: 25, jokes: true },
 	attachScreenByDefault: true,
 	tone: "banmal",
 };
 
-let current: AppSettings = load();
+function refreshKeyFlags(s: AppSettings): AppSettings {
+	s.claude.hasApiKey = getApiKey(CLAUDE_ACCOUNT) !== null;
+	s.openai.hasApiKey = getApiKey(openaiAccount(s.openai)) !== null;
+	return s;
+}
 
 function load(): AppSettings {
-	let s: AppSettings = structuredClone(defaults);
+	const s: AppSettings = structuredClone(defaults);
 	if (existsSync(settingsPath)) {
 		try {
 			const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
-			s = {
-				...s,
-				...raw,
-				provider: { ...s.provider, ...(raw.provider ?? {}) },
-			};
+			// M0 형식(provider 하나) → 새 형식으로 이전
+			if (raw.provider && !raw.openai) {
+				const p = raw.provider;
+				if (p.preset === "custom") {
+					raw.openai = { preset: "custom", baseUrl: p.baseUrl, chatModel: p.model, summaryModel: p.model, vision: p.vision };
+				} else if (p.preset === "ollama-cloud") {
+					raw.openai = { preset: "ollama-cloud", baseUrl: p.baseUrl, chatModel: p.model, summaryModel: p.model, vision: p.vision };
+				}
+				delete raw.provider;
+			}
+			Object.assign(s, raw);
+			s.claude = { ...defaults.claude, ...(raw.claude ?? {}) };
+			s.openai = { ...defaults.openai, ...(raw.openai ?? {}) };
+			s.capture = { ...defaults.capture, ...(raw.capture ?? {}) };
+			s.proactive = { ...defaults.proactive, ...(raw.proactive ?? {}) };
 		} catch (err) {
 			console.error("[settings] settings.json 읽기 실패, 기본값 사용", err);
 		}
 	}
-	s.provider.hasApiKey = getApiKey(keyAccount(s.provider)) !== null;
-	return s;
+	return refreshKeyFlags(s);
 }
+
+let current: AppSettings = load();
 
 export function getSettings(): AppSettings {
 	return current;
 }
 
-/**
- * apiKey: undefined = 그대로 둠, null 또는 "" = 삭제, 문자열 = 저장
- */
-export function saveSettings(next: AppSettings, apiKey?: string | null): AppSettings {
-	const provider = { ...next.provider, baseUrl: next.provider.baseUrl.trim().replace(/\/+$/, "") };
-	const account = keyAccount(provider);
-	if (apiKey !== undefined) {
-		if (apiKey === null || apiKey.trim() === "") deleteApiKey(account);
-		else setApiKey(account, apiKey.trim());
-	}
-	provider.hasApiKey = getApiKey(account) !== null;
-	current = { ...next, provider };
-	const { hasApiKey: _omit, ...providerOnDisk } = provider;
-	writeFileSync(settingsPath, JSON.stringify({ ...current, provider: providerOnDisk }, null, 2));
+function applyKey(account: string, key: string | null | undefined) {
+	if (key === undefined) return;
+	if (key === null || key.trim() === "") deleteApiKey(account);
+	else setApiKey(account, key.trim());
+}
+
+export function saveSettings(
+	next: AppSettings,
+	apiKeys?: { claude?: string | null; openai?: string | null },
+): AppSettings {
+	const s: AppSettings = structuredClone(next);
+	s.openai.baseUrl = s.openai.baseUrl.trim().replace(/\/+$/, "");
+	s.capture.intervalSec = Math.max(20, Math.min(600, Math.round(s.capture.intervalSec || 60)));
+	s.capture.maxShots = Math.max(1, Math.min(100, Math.round(s.capture.maxShots || 20)));
+	s.capture.retentionMin = Math.max(5, Math.min(24 * 60, Math.round(s.capture.retentionMin || 60)));
+	s.proactive.minIntervalMin = Math.max(3, Math.round(s.proactive.minIntervalMin || 12));
+	s.proactive.maxIntervalMin = Math.max(s.proactive.minIntervalMin, Math.round(s.proactive.maxIntervalMin || 25));
+	applyKey(CLAUDE_ACCOUNT, apiKeys?.claude);
+	applyKey(openaiAccount(s.openai), apiKeys?.openai);
+	current = refreshKeyFlags(s);
+	const onDisk = structuredClone(current) as any;
+	delete onDisk.claude.hasApiKey;
+	delete onDisk.openai.hasApiKey;
+	writeFileSync(settingsPath, JSON.stringify(onDisk, null, 2));
 	return current;
 }
 
-/** 설정 화면에서 아직 저장 전인 키로 테스트할 때를 위해 키를 고른다 */
-export function resolveApiKey(provider: ProviderSettings, override?: string | null): string | null {
-	if (override !== undefined && override !== null && override.trim() !== "") return override.trim();
-	return getApiKey(keyAccount(provider));
+/** 아직 저장 전인 키(override)가 있으면 그것을, 없으면 Keychain 값을 쓴다 */
+export function claudeApiKey(override?: string | null): string | null {
+	if (override && override.trim()) return override.trim();
+	return getApiKey(CLAUDE_ACCOUNT);
+}
+
+export function openaiApiKey(o: OpenAISettings, override?: string | null): string | null {
+	if (override && override.trim()) return override.trim();
+	return getApiKey(openaiAccount(o));
 }

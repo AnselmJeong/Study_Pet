@@ -25,6 +25,48 @@
 	25% { transform: rotate(-6deg); }
 	75% { transform: rotate(6deg); }
 }
+/* 행동 */
+@keyframes inky-hop {
+	0%, 100% { transform: translateY(0) scale(1, 1); }
+	15% { transform: translateY(0) scale(1.1, 0.88); }
+	45% { transform: translateY(-22px) scale(0.94, 1.08); }
+	75% { transform: translateY(0) scale(1.08, 0.92); }
+}
+@keyframes inky-look {
+	0%, 100% { transform: translateX(0); }
+	20%, 40% { transform: translateX(-5px); }
+	60%, 80% { transform: translateX(5px); }
+}
+@keyframes inky-stretch {
+	0%, 100% { transform: scale(1, 1); }
+	40%, 60% { transform: scale(0.9, 1.18); }
+}
+@keyframes inky-wave {
+	0%, 100% { transform: translate(0, 0); }
+	20%, 60% { transform: translate(4px, -26px); }
+	40%, 80% { transform: translate(10px, -22px); }
+}
+@keyframes inky-spin {
+	0% { transform: rotate(0deg); }
+	100% { transform: rotate(360deg); }
+}
+@keyframes inky-waddle {
+	0%, 100% { transform: rotate(-5deg) translateY(0); }
+	50% { transform: rotate(5deg) translateY(-3px); }
+}
+@keyframes inky-doze {
+	0%, 100% { transform: translateY(0) rotate(0deg); }
+	50% { transform: translateY(2px) rotate(-4deg); }
+}
+@keyframes inky-z {
+	0% { opacity: 0; transform: translate(0, 4px); }
+	50% { opacity: 1; }
+	100% { opacity: 0; transform: translate(6px, -10px); }
+}
+@keyframes inky-page {
+	0%, 85%, 100% { transform: rotate(0deg); }
+	92% { transform: rotate(-3deg); }
+}
 
 .inky .inky-body { transform-origin: 60px 126px; animation: inky-breathe 3.2s ease-in-out infinite; }
 .inky-happy .inky-body { animation: inky-bounce 0.5s ease-in-out 3; }
@@ -35,3 +77,15 @@
 .inky .inky-dot-3 { animation-delay: 0.3s; }
 .inky .inky-mouth { transform-origin: 60px 88px; animation: inky-talk 0.25s ease-in-out infinite; }
 .inky .inky-ribbon { transform-origin: 88px 112px; animation: inky-wiggle 2.6s ease-in-out infinite; }
+.inky .inky-level { transition: y 1.5s ease; }
+
+.inky-act-hop .inky-body { animation: inky-hop 0.7s ease-in-out 2; }
+.inky-act-lookAround .inky-eyes { animation: inky-look 2.4s ease-in-out 1; }
+.inky-act-stretch .inky-body { animation: inky-stretch 1.8s ease-in-out 1; }
+.inky-act-wave .inky-hand-r { animation: inky-wave 1.6s ease-in-out 1; }
+.inky-act-spin .inky-body { animation: inky-spin 0.9s ease-in-out 1; transform-origin: 60px 80px; }
+.inky-act-walk .inky-body { animation: inky-waddle 0.35s ease-in-out infinite; }
+.inky-act-doze .inky-body { animation: inky-doze 3s ease-in-out infinite; }
+.inky-act-read .inky-book { transform-origin: 60px 110px; animation: inky-page 3s ease-in-out infinite; }
+.inky .inky-z { animation: inky-z 2.2s ease-in-out infinite; }
+.inky .inky-z-2 { animation-delay: 1.1s; }

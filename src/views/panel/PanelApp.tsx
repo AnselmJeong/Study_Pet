@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { on } from "../common/rpc";
 import { ChatTab } from "./ChatTab";
 import { SettingsTab } from "./SettingsTab";
+import { TimelineTab } from "./TimelineTab";
 
-type Tab = "chat" | "settings";
+type Tab = "chat" | "timeline" | "settings";
 
 function tabFromHash(): Tab {
-	return location.hash === "#settings" ? "settings" : "chat";
+	const h = location.hash.slice(1);
+	return h === "settings" || h === "timeline" ? h : "chat";
 }
 
 export function PanelApp() {
@@ -21,6 +23,7 @@ export function PanelApp() {
 				{(
 					[
 						["chat", "대화"],
+						["timeline", "화면 기록"],
 						["settings", "설정"],
 					] as const
 				).map(([id, label]) => (
@@ -35,7 +38,7 @@ export function PanelApp() {
 					</button>
 				))}
 			</div>
-			<div className="min-h-0 flex-1">{tab === "chat" ? <ChatTab /> : <SettingsTab />}</div>
+			<div className="min-h-0 flex-1">{tab === "chat" ? <ChatTab /> : tab === "timeline" ? <TimelineTab /> : <SettingsTab />}</div>
 		</div>
 	);
 }
