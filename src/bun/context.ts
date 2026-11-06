@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Activity, CaptureState, PetMood, Relevance, TimelineEntry } from "../shared/types";
-import { captureScreen, deleteShot, fingerprint, fingerprintDiff, frontmostApp, idleSeconds } from "./capture";
+import { captureScreen, deleteShot, fingerprint, fingerprintDiff, frontmostApp, idleSeconds, screenLocked } from "./capture";
 import { complete, supportsVision } from "./llm/router";
 import { dataDir, getSettings } from "./settings";
 
@@ -27,10 +27,7 @@ const state: CaptureState = { running: false, paused: false, goal: "", startedAt
 
 /** 화면이 "같다"고 보는 지문 차이 기준 (0~255) */
 const SAME_SCREEN_DIFF = 2.5;
-/** 입력도 화면 변화도 없는 상태가 이만큼 이어지면 자동 일시정지 */
-const AUTO_PAUSE_MS = 15 * 60_000;
 let lastFp: Uint8Array | null = null;
-let stillSince: number | null = null;
 let pausePoll: ReturnType<typeof setInterval> | null = null;
 let timeline: TimelineEntry[] = loadTimeline();
 let captureTimer: ReturnType<typeof setTimeout> | null = null;
@@ -98,7 +95,6 @@ export function start(goal: string) {
 	state.running = true;
 	state.paused = false;
 	lastFp = null;
-	stillSince = null;
 	state.goal = goal.trim();
 	state.startedAt = Date.now();
 	ev?.captureState(getState());
@@ -118,13 +114,16 @@ export function stop() {
 	ev?.mood("idle");
 }
 
-function scheduleNext() {
+/** 입력이 없으면(영상 시청, 자리 비움) 간격을 늘려서 캡처와 요약 호출을 줄인다 */
+function scheduleNext(idle = false) {
 	if (!state.running) return;
 	if (captureTimer) clearTimeout(captureTimer);
-	captureTimer = setTimeout(() => void tick(), getSettings().capture.intervalSec * 1000);
+	const c = getSettings().capture;
+	const sec = idle ? Math.max(c.intervalSec, c.idleIntervalMin * 60) : c.intervalSec;
+	captureTimer = setTimeout(() => void tick(), sec * 1000);
 }
 
-function pauseUntilActive() {
+function pauseUntilActive(reason: "idle" | "lock") {
 	state.paused = true;
 	ev?.captureState(getState());
 	ev?.mood("idle");
@@ -132,7 +131,10 @@ function pauseUntilActive() {
 		id: newId(),
 		ts: Date.now(),
 		app: "",
-		summary: "입력과 화면 변화가 15분 넘게 없어 기록을 잠시 멈춤",
+		summary:
+			reason === "lock"
+				? "화면이 잠겨 기록을 잠시 멈춤"
+				: `입력과 화면 변화가 ${getSettings().capture.autoPauseMin}분 넘게 없어 기록을 잠시 멈춤`,
 		activity: "other",
 		relevance: "break",
 		keyTerms: [],
@@ -141,17 +143,17 @@ function pauseUntilActive() {
 	if (pausePoll) clearInterval(pausePoll);
 	pausePoll = setInterval(() => {
 		if (!state.running) return;
-		if (idleSeconds() < 10) {
+		if (!screenLocked() && idleSeconds() < 10) {
 			if (pausePoll) clearInterval(pausePoll);
 			pausePoll = null;
 			state.paused = false;
-			stillSince = null;
 			lastFp = null;
 			ev?.captureState(getState());
 			ev?.mood("focus");
+			if (!ev?.isChatBusy()) ev?.petSays("다시 왔네! 기록 다시 시작할게.", "encourage");
 			void tick();
 		}
-	}, 15_000);
+	}, 5_000);
 }
 
 async function tick() {
@@ -159,11 +161,18 @@ async function tick() {
 	if (capturing) return scheduleNext();
 	capturing = true;
 	let paused = false;
+	let idle = false;
 	try {
 		const s = getSettings();
+		if (screenLocked()) {
+			paused = true;
+			pauseUntilActive("lock");
+			return;
+		}
 		const app = frontmostApp();
 		const base = { id: newId(), ts: Date.now(), app, summary: "", activity: "other" as Activity, keyTerms: [] };
-		const idle = idleSeconds() > s.capture.idleSkipSec;
+		const idleSec = idleSeconds();
+		idle = idleSec > s.capture.idleSkipSec;
 
 		const excluded = s.capture.excludedApps.find((x) => x && app.toLowerCase().includes(x.toLowerCase()));
 		if (excluded) {
@@ -187,16 +196,13 @@ async function tick() {
 			deleteShot(shot.path);
 			const prev = timeline[timeline.length - 1];
 			if (prev && !prev.skipped) prev.repeats = (prev.repeats ?? 0) + 1;
-			if (idle) {
-				stillSince ??= Date.now();
-				if (Date.now() - stillSince >= AUTO_PAUSE_MS) {
-					paused = true;
-					pauseUntilActive();
-				}
+			// 입력도 화면 변화도 없이 autoPauseMin이 지나면 자동 일시정지
+			if (idleSec >= s.capture.autoPauseMin * 60) {
+				paused = true;
+				pauseUntilActive("idle");
 			}
 			return;
 		}
-		stillSince = null;
 
 		// 입력은 없지만 화면이 바뀌는 경우(강의 영상 등)는 계속 기록한다
 		state.lastCaptureAt = shot.ts;
@@ -207,8 +213,14 @@ async function tick() {
 			return;
 		}
 		try {
-			const parsed = await summarize(shot.path, app, idle);
-			addEntry({ ...base, ts: shot.ts, shotPath: shot.path, ...parsed });
+			const { sensitive, ...parsed } = await summarize(shot.path, app, idle);
+			if (sensitive) {
+				// 민감한 화면: 스크린샷을 바로 지우고 경로도 남기지 않는다
+				deleteShot(shot.path);
+				addEntry({ ...base, ts: shot.ts, ...parsed, summary: "민감한 화면(내용 생략)", keyTerms: [] });
+			} else {
+				addEntry({ ...base, ts: shot.ts, shotPath: shot.path, ...parsed });
+			}
 			maybeNudge();
 		} catch (err) {
 			addEntry({
@@ -222,7 +234,7 @@ async function tick() {
 		}
 	} finally {
 		capturing = false;
-		if (!paused) scheduleNext();
+		if (!paused) scheduleNext(idle);
 	}
 }
 
@@ -233,7 +245,7 @@ async function summarize(
 	shotPath: string,
 	app: string,
 	idle: boolean,
-): Promise<Pick<TimelineEntry, "summary" | "activity" | "relevance" | "keyTerms">> {
+): Promise<Pick<TimelineEntry, "summary" | "activity" | "relevance" | "keyTerms"> & { sensitive: boolean }> {
 	const prev = timeline
 		.filter((e) => !e.skipped && !e.error)
 		.slice(-3)
@@ -256,8 +268,9 @@ async function summarize(
 			`{"summary": "한국어 한 문장. 구체적으로 (예: 'Friston 2010 PDF 6쪽, 식 (3) 자유에너지 분해를 읽는 중')",`,
 			`  "activity": one of ${JSON.stringify(ACTIVITIES)},`,
 			`  "relevance": one of ${JSON.stringify(RELEVANCES)} (목표와 직접 관련=on_task, 참고자료 검색 등 간접 관련=related, 무관=off_task, 쉬는 중=break),`,
-			`  "keyTerms": ["화면에 보이는 핵심 용어 최대 5개"]}`,
-			"비밀번호, 금융 정보, 개인 메시지가 보이면 내용을 적지 말고 summary를 '민감한 화면'으로 써.",
+			`  "keyTerms": ["화면에 보이는 핵심 용어 최대 5개"],`,
+			`  "sensitive": true 또는 false (비밀번호, 금융·결제 정보, 개인 메시지 내용이 보이면 true)}`,
+			"sensitive가 true이면 summary에 내용을 적지 말고 '민감한 화면'으로만 쓰고 keyTerms는 비워.",
 		]
 			.filter(Boolean)
 			.join("\n"),
@@ -270,6 +283,7 @@ async function summarize(
 		activity: ACTIVITIES.includes(j.activity) ? j.activity : "other",
 		relevance: RELEVANCES.includes(j.relevance) ? j.relevance : "unknown",
 		keyTerms: Array.isArray(j.keyTerms) ? j.keyTerms.slice(0, 5).map(String) : [],
+		sensitive: j.sensitive === true || /민감한 화면/.test(String(j.summary ?? "")),
 	};
 }
 
@@ -307,6 +321,12 @@ function scheduleProactive() {
 /** 설정이 바뀌면 다음 말 걸기 시점을 다시 잡는다 */
 export function rescheduleProactive() {
 	scheduleProactive();
+}
+
+/** 메뉴에서 바로 말 걸기 (격려 또는 농담) */
+export async function speakNow() {
+	if (ev?.isChatBusy()) return;
+	await speak(getSettings().proactive.jokes && Math.random() < 0.4 ? "joke" : "encourage", "");
 }
 
 async function proactiveTick() {

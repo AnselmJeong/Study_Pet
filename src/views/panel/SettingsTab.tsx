@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppSettings, ModelInfo, OpenAIPreset, ProviderId, TestResult } from "../../shared/types";
 import { api } from "../common/rpc";
+import { CharacterSection } from "./CharacterSection";
 
 const PROVIDERS: { id: ProviderId; label: string }[] = [
 	{ id: "claude-sub", label: "Claude 구독 (Claude Code 로그인)" },
@@ -62,6 +63,8 @@ export function SettingsTab() {
 	const [s, setS] = useState<AppSettings | null>(null);
 	const [claudeKey, setClaudeKey] = useState("");
 	const [openaiKey, setOpenaiKey] = useState("");
+	const [tinyfishKey, setTinyfishKey] = useState("");
+	const [searchTest, setSearchTest] = useState<TestResult | "running" | null>(null);
 	const [claudeModels, setClaudeModels] = useState<ModelInfo[]>([]);
 	const [openaiModels, setOpenaiModels] = useState<ModelInfo[]>([]);
 	const [modelMsg, setModelMsg] = useState<string | null>(null);
@@ -102,15 +105,17 @@ export function SettingsTab() {
 		if (provider === "openai-compat" && r.ok && r.vision !== undefined) patch((d) => (d.openai.vision = r.vision!));
 	}
 
-	async function save(keys?: { claude?: string | null; openai?: string | null }) {
+	async function save(keys?: { claude?: string | null; openai?: string | null; tinyfish?: string | null }) {
 		const k = keys ?? {
 			claude: claudeKey.trim() ? claudeKey : undefined,
 			openai: openaiKey.trim() ? openaiKey : undefined,
+			tinyfish: tinyfishKey.trim() ? tinyfishKey : undefined,
 		};
 		const next = await api.saveSettings({ settings: s!, apiKeys: k });
 		setS(next);
 		setClaudeKey("");
 		setOpenaiKey("");
+		setTinyfishKey("");
 		setSaved(true);
 	}
 
@@ -268,6 +273,17 @@ export function SettingsTab() {
 				<p className="text-[11px] text-slate-400">
 					스크린샷은 장수나 보관 시간 중 하나라도 넘으면 자동으로 지워져. 텍스트 요약은 30일 동안 남아.
 				</p>
+				<div className="grid grid-cols-2 gap-2">
+					<Field label="자동 일시정지 (분)">
+						<input type="number" min={2} max={60} value={s.capture.autoPauseMin} onChange={(e) => patch((d) => (d.capture.autoPauseMin = Number(e.target.value)))} className={inputCls} />
+					</Field>
+					<Field label="입력 없을 때 기록 간격 (분)">
+						<input type="number" min={1} max={15} value={s.capture.idleIntervalMin} onChange={(e) => patch((d) => (d.capture.idleIntervalMin = Number(e.target.value)))} className={inputCls} />
+					</Field>
+				</div>
+				<p className="text-[11px] text-slate-400">
+					화면이 잠기면 바로 멈추고, 입력도 화면 변화도 없이 자동 일시정지 시간이 지나면 멈춰. 다시 키보드나 마우스를 쓰면 이어서 기록해. 입력 없이 화면만 바뀔 때(영상 등)는 더 긴 간격으로 기록해.
+				</p>
 				<Field label="기록하지 않을 앱 (쉼표로 구분)">
 					<input
 						value={s.capture.excludedApps.join(", ")}
@@ -284,6 +300,47 @@ export function SettingsTab() {
 						<button onClick={async () => setScreenOk((await api.requestScreenPermission({})).granted)} className="rounded-md bg-slate-100 px-2 py-1 hover:bg-slate-200">
 							권한 요청 / 설정 열기
 						</button>
+					)}
+				</div>
+			</Section>
+
+			<Section title="웹 검색 (TinyFish)">
+				<label className="flex items-center gap-2">
+					<input type="checkbox" checked={s.search.enabled} onChange={(e) => patch((d) => (d.search.enabled = e.target.checked))} />
+					웹 검색 사용 (필요할 때 잉키가 알아서 검색, 🔎를 켜면 항상 검색)
+				</label>
+				<Field label="TinyFish API 키" hint="agent.tinyfish.ai/api-keys 에서 만들 수 있어. 검색은 무료야.">
+					<div className="flex gap-2">
+						<input
+							type="password"
+							value={tinyfishKey}
+							onChange={(e) => setTinyfishKey(e.target.value)}
+							placeholder={s.search.hasApiKey ? "••••••••  (Keychain에 저장됨)" : "키를 입력"}
+							className={inputCls}
+						/>
+						{s.search.hasApiKey && (
+							<button onClick={() => save({ tinyfish: null })} className="shrink-0 rounded-md px-2 text-xs text-rose-600 hover:bg-rose-50">
+								키 삭제
+							</button>
+						)}
+					</div>
+				</Field>
+				<div className="flex items-center gap-2">
+					<button
+						onClick={async () => {
+							setSearchTest("running");
+							setSearchTest(await api.testSearch({ apiKey: tinyfishKey || undefined }));
+						}}
+						disabled={searchTest === "running"}
+						className="shrink-0 rounded-md bg-slate-800 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+					>
+						{searchTest === "running" ? "테스트 중…" : "검색 테스트"}
+					</button>
+					{searchTest && searchTest !== "running" && (
+						<span className={`text-xs ${searchTest.ok ? "text-emerald-700" : "text-rose-600"}`}>
+							{searchTest.ok ? "✓ " : "✗ "}
+							{searchTest.detail}
+						</span>
 					)}
 				</div>
 			</Section>
@@ -305,6 +362,10 @@ export function SettingsTab() {
 						<input type="number" min={3} value={s.proactive.maxIntervalMin} onChange={(e) => patch((d) => (d.proactive.maxIntervalMin = Number(e.target.value)))} className={inputCls} />
 					</Field>
 				</div>
+			</Section>
+
+			<Section title="캐릭터">
+				<CharacterSection />
 			</Section>
 
 			<Section title="대화">

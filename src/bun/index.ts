@@ -1,6 +1,7 @@
 import {
 	ApplicationMenu,
 	BrowserView,
+	ContextMenu,
 	BrowserWindow,
 	GlobalShortcut,
 	Screen,
@@ -12,10 +13,13 @@ import type { ChatMessage, PetMood } from "../shared/types";
 import * as chat from "./chat";
 import * as context from "./context";
 import { hasScreenPermission, requestScreenPermission } from "./capture";
+import { testSearch } from "./search";
 import { CLAUDE_MODELS, claudeTest } from "./llm/claudeSub";
 import { listModels, testConnection } from "./llm/openaiCompat";
-import { claudeApiKey, getSettings, openaiApiKey, saveSettings } from "./settings";
+import { claudeApiKey, getSettings, openaiApiKey, saveSettings, setPetPackId } from "./settings";
+import * as packs from "./packs";
 
+const APP_NAME = "Inky";
 const PET_COMPACT = { width: 150, height: 170 };
 const MARGIN = 24;
 
@@ -71,11 +75,11 @@ function makeRPC() {
 		maxRequestTime: 120_000,
 		handlers: {
 			requests: {
-				ask: async ({ text, attachScreen }) => {
+				ask: async ({ text, attachScreen, webSearch }) => {
 					const t = text.trim();
 					if (!t) return { accepted: false, reason: "빈 질문" };
 					if (chat.isBusy()) return { accepted: false, reason: "이전 답을 쓰는 중이야" };
-					void chat.ask(t, attachScreen, chatEvents);
+					void chat.ask(t, attachScreen, chatEvents, webSearch ?? false);
 					return { accepted: true };
 				},
 				cancel: () => ({ ok: chat.cancel() }),
@@ -100,6 +104,7 @@ function makeRPC() {
 					provider === "claude-sub"
 						? claudeTest(settings.claude, claudeApiKey(apiKey))
 						: testConnection(settings.openai, openaiApiKey(settings.openai, apiKey)),
+				testSearch: ({ apiKey }) => testSearch(apiKey),
 				getScreenPermission: () => ({ granted: hasScreenPermission() }),
 				requestScreenPermission: () => ({ granted: requestScreenPermission() }),
 				openPanel: ({ tab }) => {
@@ -124,6 +129,23 @@ function makeRPC() {
 					return context.getState();
 				},
 				getTimeline: () => context.getTimeline(),
+				listPacks: () => packs.listUserPacks(),
+				getPack: ({ id }) => ({ pack: packs.getPack(id) }),
+				setPetPack: ({ id }) => {
+					const s = setPetPackId(id);
+					send("settingsChanged", s);
+					return s;
+				},
+				importPack: () => packs.importPackFromDialog(),
+				removePack: ({ id }) => ({ ok: packs.removePack(id) }),
+				openPacksFolder: () => {
+					packs.openPacksFolder();
+					return { ok: true };
+				},
+				showContextMenu: ({ where, editable, hasSelection }) => {
+					showAppContextMenu(where, Boolean(editable), Boolean(hasSelection));
+					return { ok: true };
+				},
 			},
 			messages: {},
 		},
@@ -132,13 +154,15 @@ function makeRPC() {
 
 // ---------- 펫 창 ----------
 
+let quitting = false;
+
 function createPetWindow() {
 	const wa = Screen.getPrimaryDisplay().workArea;
 	const x = wa.x + wa.width - PET_COMPACT.width - MARGIN;
 	const y = wa.y + wa.height - PET_COMPACT.height - MARGIN;
 
 	petWin = new BrowserWindow({
-		title: "Study Pet",
+		title: APP_NAME,
 		url: "views://app/pet/index.html",
 		titleBarStyle: "hidden",
 		transparent: true,
@@ -149,6 +173,8 @@ function createPetWindow() {
 	petWin.setVisibleOnAllWorkspaces(true);
 	petWin.on("close", () => {
 		petWin = null;
+		// ⌘W 등으로 실수로 닫혀도 잉키가 사라지지 않게 다시 띄운다
+		if (!quitting) setTimeout(() => !petWin && !quitting && createPetWindow(), 800);
 	});
 }
 
@@ -195,7 +221,7 @@ function openPanel(tab: "chat" | "timeline" | "settings") {
 	const width = 440;
 	const height = Math.min(680, wa.height - 2 * MARGIN);
 	panelWin = new BrowserWindow({
-		title: "Study Pet",
+		title: APP_NAME,
 		url: `views://app/panel/index.html#${tab}`,
 		titleBarStyle: "hiddenInset",
 		frame: {
@@ -214,7 +240,7 @@ function openPanel(tab: "chat" | "timeline" | "settings") {
 // ---------- 메뉴, 트레이, 단축키 ----------
 
 ApplicationMenu.setApplicationMenu([
-	{ submenu: [{ label: "Study Pet 종료", role: "quit", accelerator: "q" }] },
+	{ submenu: [{ label: "Inky 종료", role: "quit", accelerator: "q" }] },
 	{
 		label: "Edit",
 		submenu: [
@@ -236,6 +262,8 @@ function updateTrayMenu() {
 	tray.setTitle(running ? "🖋️●" : "🖋️");
 	tray.setMenu([
 		{ type: "normal", label: "잉키에게 물어보기 (⌥Space)", action: "ask" },
+		{ type: "normal", label: "잉키 불러오기 (오른쪽 아래로)", action: "summon" },
+		{ type: "normal", label: "잉키야, 한마디 해 줘", action: "speak" },
 		{ type: "normal", label: running ? "공부 세션 끝내기 (화면 기록 중지)" : "공부 세션 시작 (1분마다 화면 기록)", action: "toggle-session" },
 		{ type: "divider" },
 		{ type: "normal", label: "대화 패널", action: "panel" },
@@ -249,10 +277,17 @@ function updateTrayMenu() {
 }
 updateTrayMenu();
 
-tray.on("tray-clicked", (event: any) => {
-	switch (event?.data?.action) {
+/** 트레이 메뉴와 우클릭 메뉴가 같이 쓰는 동작 */
+function runMenuAction(action: string | undefined) {
+	switch (action) {
 		case "ask":
 			focusPetInput();
+			break;
+		case "summon":
+			summonPet();
+			break;
+		case "speak":
+			void context.speakNow();
 			break;
 		case "toggle-session":
 			if (context.getState().running) context.stop();
@@ -270,7 +305,7 @@ tray.on("tray-clicked", (event: any) => {
 		case "permission": {
 			const granted = hasScreenPermission() || requestScreenPermission();
 			Utils.showNotification({
-				title: "Study Pet",
+				title: APP_NAME,
 				body: granted
 					? "화면 기록 권한이 있어요."
 					: "시스템 설정 > 개인정보 보호 및 보안 > 화면 기록에서 허용한 뒤 앱을 다시 실행해 주세요.",
@@ -278,12 +313,57 @@ tray.on("tray-clicked", (event: any) => {
 			break;
 		}
 		case "quit":
+			quitting = true;
 			context.stop();
 			tray.remove();
 			Utils.quit();
 			break;
 	}
-});
+}
+
+tray.on("tray-clicked", (event: any) => runMenuAction(event?.data?.action));
+
+function showAppContextMenu(_where: "pet" | "panel", editable: boolean, hasSelection: boolean) {
+	const running = context.getState().running;
+	const edit: any[] =
+		editable || hasSelection
+			? [
+					...(editable ? [{ role: "cut" }] : []),
+					{ role: "copy" },
+					...(editable ? [{ role: "paste" }] : []),
+					{ role: "selectAll" },
+					{ type: "divider" },
+				]
+			: [];
+	ContextMenu.showContextMenu([
+		...edit,
+		{ type: "normal", label: "물어보기 (⌥Space)", action: "ask" },
+		{ type: "normal", label: "대화 패널", action: "panel" },
+		{ type: "normal", label: "화면 기록 타임라인", action: "timeline" },
+		{ type: "normal", label: "설정", action: "settings" },
+		{ type: "divider" },
+		{ type: "normal", label: running ? "공부 세션 끝내기" : "공부 세션 시작", action: "toggle-session" },
+		{ type: "normal", label: "잉키야, 한마디 해 줘", action: "speak" },
+		{ type: "normal", label: "잉키 불러오기 (오른쪽 아래로)", action: "summon" },
+		{ type: "divider" },
+		{ type: "normal", label: "종료", action: "quit" },
+	]);
+}
+
+ContextMenu.on("context-menu-clicked", (event: any) => runMenuAction(event?.data?.action));
+
+/** 펫 창이 닫혔거나 화면 밖에 있으면 메인 화면 오른쪽 아래로 다시 데려온다 */
+function summonPet() {
+	if (!petWin) {
+		createPetWindow();
+		return;
+	}
+	const wa = Screen.getPrimaryDisplay().workArea;
+	const f = petWin.getFrame();
+	petWin.setFrame(wa.x + wa.width - f.width - MARGIN, wa.y + wa.height - f.height - MARGIN, f.width, f.height);
+	petWin.setAlwaysOnTop(true);
+	petWin.show();
+}
 
 function focusPetInput() {
 	if (!petWin) createPetWindow();
@@ -298,6 +378,13 @@ const shortcut = ["Alt+Space", "CommandOrControl+Shift+Space"].find((acc) =>
 console.log(`[study-pet] 단축키: ${shortcut ?? "등록 실패"}`);
 
 // ---------- 시작 ----------
+
+// 메뉴 막대 앱(LSUIElement)으로 동작: Dock 아이콘을 숨긴다. Info.plist의 LSUIElement와 함께 이중 안전장치.
+try {
+	Utils.setDockIconVisible(false);
+} catch (err) {
+	console.error("[study-pet] Dock 아이콘 숨기기 실패", err);
+}
 
 createPetWindow();
 

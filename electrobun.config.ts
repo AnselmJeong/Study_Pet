@@ -2,7 +2,7 @@ import type { ElectrobunConfig } from "electrobun";
 
 export default {
 	app: {
-		name: "Study Pet",
+		name: "Inky",
 		identifier: "dev.anselm.studypet",
 		version: "0.0.1",
 	},
@@ -20,6 +20,8 @@ export default {
 		watchIgnore: ["dist/**"],
 		mac: {
 			bundleCEF: false,
+			// 잉키 SVG(assets/icon.svg)에서 렌더한 아이콘. scripts/make-icon.sh로 다시 만들 수 있다.
+			icons: "assets/icon.iconset",
 		},
 		linux: {
 			bundleCEF: false,

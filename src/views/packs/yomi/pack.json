@@ -1,0 +1,23 @@
+{
+	"format": 1,
+	"id": "yomi",
+	"name": "요미",
+	"author": "Study Pet 기본",
+	"description": "연필 머리핀을 꽂은 공부 친구 (오리지널 샘플 캐릭터)",
+	"license": "앱과 함께 자유롭게 수정해서 써도 돼",
+	"preview": "preview.png",
+	"height": 150,
+	"fps": 4,
+	"motion": true,
+	"states": {
+		"idle": { "frames": ["idle/01.png", "idle/02.png"], "durations": [3200, 160] },
+		"talk": { "frames": ["talk/01.png", "talk/02.png", "talk/01.png", "talk/03.png"], "fps": 7 },
+		"think": { "frames": "think/", "fps": 2.5 },
+		"happy": { "frames": "happy/", "fps": 3 },
+		"error": "error/01.png",
+		"read": { "frames": ["read/01.png", "read/01.png", "read/02.png", "read/01.png", "read/03.png"], "durations": [2600, 2600, 500, 2400, 160] },
+		"wave": { "frames": "wave/", "fps": 4 },
+		"sleep": { "frames": "sleep/", "fps": 1 },
+		"walk": { "frames": "walk/", "fps": 6 }
+	}
+}

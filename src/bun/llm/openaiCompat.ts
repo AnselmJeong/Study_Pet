@@ -2,7 +2,7 @@
 // 외부 SDK 없이 fetch + SSE 파싱으로 구현한다.
 
 import type { ModelInfo, OpenAISettings, TestResult } from "../../shared/types";
-import type { CompleteRequest } from "./types";
+import type { AppTool, CompleteRequest } from "./types";
 
 export type ContentPart =
 	| { type: "text"; text: string }
@@ -11,7 +11,63 @@ export type ContentPart =
 export type OAIMessage =
 	| { role: "system"; content: string }
 	| { role: "user"; content: string | ContentPart[] }
-	| { role: "assistant"; content: string };
+	| { role: "assistant"; content: string | null; tool_calls?: OAIToolCall[] }
+	| { role: "tool"; tool_call_id: string; content: string };
+
+type OAIToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+
+function toolSpecs(tools: AppTool[]) {
+	return tools.map((t) => ({
+		type: "function",
+		function: {
+			name: t.name,
+			description: t.description,
+			parameters: { type: "object", properties: t.params, required: t.required },
+		},
+	}));
+}
+
+/**
+ * 도구 호출 단계: 스트리밍 없이 물어보고, 모델이 도구를 부르면 실행해서 결과를 붙인다.
+ * 도구를 부르지 않으면 그 답을 그대로 돌려준다. 모델이 도구를 지원하지 않으면 null.
+ */
+async function runToolRounds(
+	o: OpenAISettings,
+	apiKey: string | null,
+	model: string,
+	messages: OAIMessage[],
+	tools: AppTool[],
+	signal?: AbortSignal,
+	maxTokens?: number,
+): Promise<string | null> {
+	for (let round = 0; round < 3; round++) {
+		const res = await fetch(`${base(o)}/chat/completions`, {
+			method: "POST",
+			headers: headers(apiKey),
+			signal,
+			body: JSON.stringify({ model, messages, tools: toolSpecs(tools), max_tokens: maxTokens ?? 2048 }),
+		});
+		if (!res.ok) {
+			if (round === 0 && res.status >= 400 && res.status < 500) return null; // 도구 미지원으로 보고 일반 대화로
+			throw new Error(await errorText(res));
+		}
+		const j = (await res.json()) as any;
+		const msg = j.choices?.[0]?.message;
+		const calls: OAIToolCall[] = msg?.tool_calls ?? [];
+		if (!calls.length) return String(msg?.content ?? "");
+		messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: calls });
+		for (const c of calls) {
+			const t = tools.find((x) => x.name === c.function?.name);
+			let args: Record<string, unknown> = {};
+			try {
+				args = JSON.parse(c.function?.arguments || "{}");
+			} catch {}
+			const out = t ? await t.run(args) : `알 수 없는 도구: ${c.function?.name}`;
+			messages.push({ role: "tool", tool_call_id: c.id, content: out });
+		}
+	}
+	return null; // 라운드를 다 쓰면 마지막은 스트리밍으로 답하게 한다
+}
 
 function headers(apiKey: string | null): Record<string, string> {
 	const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -179,6 +235,18 @@ export async function openaiComplete(o: OpenAISettings, apiKey: string | null, r
 			});
 		}
 	}
+	const messages: OAIMessage[] = [
+		{ role: "system", content: req.system },
+		...req.history.map((t) => ({ role: t.role, content: t.text }) as OAIMessage),
+		{ role: "user", content },
+	];
+	if (req.tools?.length) {
+		const direct = await runToolRounds(o, apiKey, req.model, messages, req.tools, req.signal, req.maxTokens);
+		if (direct !== null && direct.trim()) {
+			req.onDelta?.(direct);
+			return direct;
+		}
+	}
 	return streamChat({
 		provider: o,
 		model: req.model,
@@ -186,10 +254,6 @@ export async function openaiComplete(o: OpenAISettings, apiKey: string | null, r
 		signal: req.signal,
 		maxTokens: req.maxTokens,
 		onDelta: req.onDelta ?? (() => {}),
-		messages: [
-			{ role: "system", content: req.system },
-			...req.history.map((t) => ({ role: t.role, content: t.text }) as OAIMessage),
-			{ role: "user", content },
-		],
+		messages,
 	});
 }

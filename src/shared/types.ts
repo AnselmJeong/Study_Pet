@@ -35,6 +35,10 @@ export type CaptureSettings = {
 	idleSkipSec: number;
 	/** 이 시간(분)보다 오래된 스크린샷은 자동 삭제 (텍스트 요약은 남김) */
 	retentionMin: number;
+	/** 입력도 화면 변화도 없이 이 시간(분)이 지나면 자동 일시정지 */
+	autoPauseMin: number;
+	/** 입력이 없는 동안(영상 시청 등)에는 이 간격(분)으로만 캡처·요약 */
+	idleIntervalMin: number;
 };
 
 export type ProactiveSettings = {
@@ -47,6 +51,12 @@ export type ProactiveSettings = {
 	jokes: boolean;
 };
 
+export type SearchSettings = {
+	/** TinyFish 웹 검색 사용 */
+	enabled: boolean;
+	hasApiKey: boolean;
+};
+
 export type AppSettings = {
 	chatProvider: ProviderId;
 	summaryProvider: ProviderId;
@@ -54,9 +64,12 @@ export type AppSettings = {
 	openai: OpenAISettings;
 	capture: CaptureSettings;
 	proactive: ProactiveSettings;
+	search: SearchSettings;
 	/** 질문할 때 현재 화면을 기본으로 첨부할지 */
 	attachScreenByDefault: boolean;
 	tone: "banmal" | "jondaetmal";
+	/** 펫 캐릭터 팩 id ("inky" = 기본 잉키). docs/CHARACTER_PACKS.md */
+	petPackId: string;
 };
 
 export type ChatMessage = {
@@ -64,6 +77,8 @@ export type ChatMessage = {
 	role: "user" | "assistant";
 	text: string;
 	withScreen?: boolean;
+	/** 이 질문에 웹 검색을 썼는지 */
+	searched?: boolean;
 	ts: number;
 	error?: boolean;
 };

@@ -1,6 +1,6 @@
 # Study Pet: 데스크톱 학습 동반자 펫 앱 상세 계획서
 
-> 작성일: 2026-11-05 · v2 (Electrobun, 구독/Ollama LLM, 퀴즈·학습 질문 제거 반영) · 상태: 계획(구현 전) · 대상 플랫폼: macOS 우선 (Windows는 2단계)
+> 작성일: 2026-11-05 · v4 (2026-11-06: Claude 구독(Agent SDK)을 기본 제공자로, 1분 화면 요약을 Sonnet으로, 로컬 Ollama 제거, 세션 기반 캡처·화면 변화 감지·자동 일시정지·스크린샷 보관 기한·먼저 말 걸기 추가) · 상태: M0~M1 구현 중 · 대상 플랫폼: macOS 우선 (Windows는 2단계)
 
 ---
 
@@ -11,12 +11,12 @@
 
 펫은 퀴즈를 내거나 학습 확인 질문을 먼저 던지지 않는다. 사용자가 물어볼 때만 답한다.
 
-LLM은 **Claude 구독 / Codex(ChatGPT) 구독 / Ollama(OpenAI 호환 API)** 중에서 고르고, API 키와 모델을 앱에서 직접 지정한다.
+LLM은 **Claude 구독(기본) / Codex(ChatGPT) 구독 / OpenAI 호환 API(Ollama Cloud 등)** 중에서 고르고, 모델을 앱에서 직접 지정한다. Claude 구독은 이 Mac에 로그인된 Claude Code를 그대로 써서 API 키가 필요 없다. 로컬 Ollama는 쓰지 않는다.
 
 핵심 설계 원칙 세 가지:
 
 1. **방해하지 않는 것이 기본값이다.** 펫은 개입보다 관찰을 훨씬 많이 한다. 개입은 목표에서 벗어났다는 증거가 몇 분간 쌓였을 때만 한다.
-2. **맥락은 텍스트로 압축해서 쌓는다.** 스크린샷 20장을 매번 모델에 보내지 않는다. 1분마다 가벼운 비전 모델(기본: Ollama)이 한 줄 요약을 만들고, 질문할 때만 최근 원본 몇 장을 붙인다. 1분 요약에 구독 사용량을 쓰지 않는다.
+2. **맥락은 텍스트로 압축해서 쌓는다.** 스크린샷 20장을 매번 모델에 보내지 않는다. 1분마다 **Claude 구독의 Sonnet**이 화면을 한 줄로 요약해 로컬 타임라인에 저장하고, 질문할 때는 이 요약 텍스트와 필요하면 현재 화면 1장만 붙인다.
 3. **모든 데이터는 로컬에 두고, 모든 수집은 눈에 보이게 한다.** 캡처 중 표시, 즉시 일시정지 단축키, 앱 제외 목록, 20장 링버퍼 자동 삭제.
 
 ---
@@ -115,7 +115,8 @@ LLM은 **Claude 구독 / Codex(ChatGPT) 구독 / Ollama(OpenAI 호환 API)** 중
 - "이 개념 다른 설명 찾아줘", "이 뉴런 구조 그림 찾아줘"
 - 텍스트 결과: 출처 링크 3~5개 + 요약
 - 이미지 결과: 썸네일 그리드 (출처·라이선스 표시), 클릭 시 원본 페이지 열기, "저장" 버튼
-- 검색 여부는 모델이 판단, 설정에 "검색 전에 물어보기" 옵션
+- 검색 여부는 모델이 판단(`web_search` 도구). 입력창의 🔎를 켜면 답하기 전에 항상 검색한다
+- 구현됨(2026-11-06): TinyFish Search API, 키는 설정 → 웹 검색에서 입력(Keychain 저장)
 
 ### 2.8 화면 구성
 
@@ -143,9 +144,9 @@ LLM은 **Claude 구독 / Codex(ChatGPT) 구독 / Ollama(OpenAI 호환 API)** 중
 
 | 단계 | 기간(1인 추정) | 범위 |
 |---|---|---|
-| **M0 프로토타입** | 1주 | Electrobun 투명 펫 창 + 입력창 + LLM 제공자 1개(Ollama) 대화 + 현재 화면 1장 첨부 질문 |
-| **M1 맥락 인식 MVP** | 2~3주 | 1분 캡처, 20장 링버퍼, 1분 요약 타임라인, 세션 시작/종료, 개입 사다리 0~2, 일시정지/제외 앱 |
-| **M2 LLM 제공자 3종** | 1~2주 | Claude 구독, Codex 구독 어댑터, 설정 화면(키 입력·모델 선택·역할별 배정·연결 테스트) |
+| **M0 프로토타입** | 1주 | Electrobun 투명 펫 창 + 입력창 + Claude 구독 / OpenAI 호환 대화 + 현재 화면 1장 첨부 질문 + 1분 화면 요약 타임라인(Sonnet) |
+| **M1 맥락 인식 MVP** | 2~3주 | 세션 시작/종료, 관련도 분류, 개입 사다리 0~2, 제외 앱, 타임라인 SQLite 이전 |
+| **M2 LLM 제공자 확장** | 1~2주 | Codex 구독 어댑터, 역할별 배정, Claude 툴(MCP) 연결 |
 | **M3 자료 기반 답변** | 2주 | PDF/EPUB/MD 첨부·제거, 로컬 검색, 근거 인용 답변 |
 | **M4 리마인더 & 검색** | 1~2주 | 자연어/조건형 리마인더, 웹 검색, 이미지 검색 그리드 |
 | **M5 다듬기** | 2주 | 펫 애니메이션 완성, 개인화 임계값, 통계 화면, 서명·자동 업데이트 |
@@ -203,8 +204,8 @@ Codex 펫(구름 머리 + 모니터 얼굴 로봇)과 겹치지 않는 모티프
 | UI | React + Vite + Tailwind (Electrobun `react-tailwind-vite` 템플릿에서 시작), KaTeX, react-markdown | 펫 창과 패널 창 각각 별도 view |
 | 펫 렌더링 | CSS 스프라이트 → Rive | §4 |
 | 로컬 DB | `bun:sqlite` (Bun 내장) + FTS5, 선택적으로 `sqlite-vec` | macOS 기본 SQLite는 확장 로드가 막혀 있어 `sqlite-vec`를 쓰려면 `Database.setCustomSQLite()`로 Homebrew/번들 SQLite 지정 필요 |
-| LLM | 제공자 어댑터 3종 (§5.3) | Claude 구독, Codex 구독, Ollama OpenAI 호환 |
-| 웹 검색 | Ollama Web Search/Fetch API (`POST https://ollama.com/api/web_search`, `/api/web_fetch`, Ollama API 키) | 어떤 LLM 제공자를 써도 똑같이 동작하도록 앱 자체 툴로 구현 |
+| LLM | 제공자 어댑터 3종 (§5.3) | Claude 구독(기본), Codex 구독, OpenAI 호환(Ollama Cloud 등) |
+| 웹 검색 | TinyFish Search API (`GET https://api.search.tinyfish.ai?query=…`, `X-API-Key` 헤더, `domain_type` web/news/research_paper, 검색 무료) | 앱 자체 툴(`src/bun/search.ts`). Claude는 인프로세스 MCP 도구, OpenAI 호환은 function calling으로 같은 툴을 쓴다. 페이지 본문 가져오기(TinyFish Fetch)는 이후 |
 | 이미지 검색 | Wikimedia Commons API (무료, 라이선스 명확) + 선택적으로 Brave Image Search API 키 | 검색 결과 페이지의 `og:image` 추출도 보조로 사용 |
 | 문서 파싱 | PDF: `pdfjs-dist`(페이지별 텍스트), EPUB: EPUB 파서 → 장별 Markdown, MD: 그대로 | 변환 결과를 Markdown 캐시로 저장 |
 | 이미지 처리 | `sharp` (RGBA → WebP/JPEG, 다운스케일) | 대안으로 macOS `screencapture` CLI가 바로 JPEG 파일을 만들어 줌 |
@@ -221,7 +222,7 @@ Codex 펫(구름 머리 + 모니터 얼굴 로봇)과 겹치지 않는 모티프
 │                                                                         │
 │  LLMRouter ── 역할별 제공자 선택 ──┬─ ClaudeSubscriptionProvider         │
 │   (chat / summarize / nudge)       ├─ CodexSubscriptionProvider          │
-│                                    └─ OpenAICompatProvider (Ollama 등)   │
+│                                    └─ OpenAICompatProvider (Ollama Cloud)│
 │                                                                         │
 │  ToolHost: web_search · web_fetch · image_search · get_screenshot ·     │
 │            search_documents · create_reminder · add_to_parking_lot      │
@@ -260,11 +261,11 @@ interface LLMProvider {
 ```
 
 **① Claude 구독 (`claude-sub`)**
-- 구현: `@anthropic-ai/claude-agent-sdk`의 `query()`. 사용자의 Mac에 설치되어 로그인된 Claude Code(`claude` CLI)의 인증을 그대로 쓰므로 앱에는 API 키가 필요 없다. 설정에 "Claude Code 로그인 확인" 버튼과 선택적 API 키 입력란(키를 넣으면 API 과금으로 전환)을 둔다.
+- 구현(`src/bun/llm/claudeSub.ts`): `@anthropic-ai/claude-agent-sdk`의 `query()`. 이 Mac에 로그인된 Claude Code 인증을 그대로 쓰므로 앱에는 API 키가 필요 없다. 앱에 키를 넣지 않았으면 환경의 `ANTHROPIC_API_KEY`를 지워서 항상 구독으로 나가고, 키를 넣으면 API 과금으로 전환한다. `tools: []`, `settingSources: []`, `persistSession: false`, `maxTurns: 1`로 도구·사용자 설정·CLAUDE.md를 끈다. 스트리밍은 `includePartialMessages`, 취소는 `abortController`. SDK 내장 실행 파일(`@anthropic-ai/claude-agent-sdk-darwin-arm64`)을 못 찾으면(앱 번들이 프로젝트 폴더 밖에 있을 때) 설치된 `claude`(`~/.local/bin/claude` 등)를 `pathToClaudeCodeExecutable`로 쓴다. Bun에서 텍스트·이미지·취소 동작 확인 완료(호출당 약 4~8초). 설정 화면에 "연결 확인" 버튼. 제공자 선택은 `src/bun/llm/router.ts`가 역할(대화/요약)별로 한다.
 - 모델 선택: 드롭다운 (`opus`, `sonnet`, `haiku` 별칭 또는 전체 모델 ID 직접 입력).
-- 툴: ToolHost를 `createSdkMcpServer()`로 인프로세스 MCP 서버로 노출. Claude Code 기본 내장 도구(Bash, Edit 등)는 `allowedTools`로 막고 우리 툴과 `Read`(활성 문서 폴더 한정)만 허용.
+- 툴(M2): ToolHost를 `createSdkMcpServer()`로 인프로세스 MCP 서버로 노출. 기본 내장 도구는 계속 막고 우리 툴과 `Read`(활성 문서 폴더 한정)만 허용.
 - 이미지: 스트리밍 입력 모드에서 이미지 블록 전달, 또는 링버퍼 파일 경로를 주고 `Read`로 보게 한다.
-- 세션 유지: 세션 ID를 저장해 이어가기(`resume`)로 매 질문마다 맥락을 다시 보내는 비용을 줄인다.
+- 세션 유지: M0은 매 질문마다 이전 대화(최근 12턴)를 텍스트로 붙인다. 이후 `resume`으로 이어가기를 검토.
 - 주의: 이 방식은 **본인 PC에서 본인 계정으로 쓰는 개인용**을 전제로 한다. 앱을 다른 사람에게 배포하면서 claude.ai 구독 로그인을 제공하는 것은 Anthropic 정책상 허용되지 않으므로, 배포판에서는 API 키 모드만 남긴다.
 
 **② Codex 구독 (`codex-sub`)**
@@ -275,10 +276,9 @@ interface LLMProvider {
 - 툴: Codex 설정의 MCP 서버로 ToolHost를 연결 (로컬 stdio MCP 서버로 실행).
 - 스레드 유지: `resumeThread(id)`로 세션 동안 같은 스레드를 이어간다.
 
-**③ OpenAI 호환 API (`openai-compat`, 기본: Ollama)**
+**③ OpenAI 호환 API (`openai-compat`, 보조)**
 - 구현: `openai` npm SDK에 `baseURL` 지정. 프리셋:
   - Ollama Cloud: `https://ollama.com/v1` + Ollama API 키 (ollama.com에서 발급)
-  - 로컬 Ollama: `http://localhost:11434/v1` (키 불필요)
   - 기타: 사용자가 Base URL과 키를 직접 입력 (LM Studio, OpenRouter 등)
 - 모델 선택: `GET /v1/models`로 목록을 불러오고, 실패하면 Ollama `GET /api/tags`로 대체, 직접 입력도 허용. 모델마다 "비전 가능" 표시 (연결 테스트 결과로 확정).
 - 엔드포인트: `/v1/chat/completions` (스트리밍 + function calling). 이미지는 **base64 데이터 URL만** 지원되므로 링버퍼 파일을 base64로 인코딩해서 보낸다.
@@ -288,8 +288,9 @@ interface LLMProvider {
 
 | 역할 | 빈도 | 기본 배정 | 이유 |
 |---|---|---|---|
-| 1분 화면 요약/관련도 분류 | 분당 1회 | Ollama 비전 모델 (Qwen3-VL, Gemma 3 계열 등 사용 가능한 것) | 하루 수백 회 호출. 구독 CLI는 호출마다 프로세스를 띄워 느리고 사용 한도를 빨리 소모함 |
-| 사용자 질문 답변, 세션 요약 | 요청 시 | 사용자가 고른 주 제공자 (Claude 구독 / Codex 구독 / Ollama) | 품질이 중요한 곳에 구독 사용 |
+| 1분 화면 요약/관련도 분류 | 세션 중 분당 최대 1회 | **Claude 구독 Sonnet** (설정에서 제공자·모델·간격 변경) | 요약 품질 우선. 화면이 바뀌지 않으면 호출하지 않고, 입력이 없으면 3분 간격으로 줄이고, 화면 잠금 시 바로·입력도 변화도 없이 5분이면 자동 일시정지해서 사용량을 아낀다 |
+| 먼저 말 걸기 (격려, 농담, 휴식 권유, 복귀 제안) | 12~25분 간격 + 딴짓 감지 시 | 요약 역할 제공자 | 자리 비움(5분 무입력)이나 대화 중에는 말 걸지 않음. 복귀 제안은 시간당 최대 3회 |
+| 사용자 질문 답변, 세션 요약 | 요청 시 | 사용자가 고른 주 제공자 (Claude 구독 기본 / Codex 구독 / OpenAI 호환) | 최근 2시간 요약 타임라인을 시스템 프롬프트에 넣는다 |
 | 개입 문구 생성 | 시간당 최대 3회 | 1분 요약과 같은 모델 | 짧은 문장, 빠른 응답 |
 
 - 역할마다 "제공자 + 모델"을 따로 고를 수 있다. 주 제공자가 실패(한도 초과, 로그인 만료)하면 지정한 대체 제공자로 넘어가고 펫이 한 줄로 알린다.
@@ -305,8 +306,9 @@ interface LLMProvider {
 - 메타데이터: 시각, 활성 앱, 창 제목(`osascript` 또는 접근성 API), 화면 변화량.
 
 **중복/무변화 처리**
-- 직전 캡처와 지각 해시(dHash) 거리를 비교해서 거의 같으면 새로 저장하지 않고 직전 항목의 지속 시간만 늘린다. 링버퍼 20장이 "서로 다른 20개 장면"이 된다.
-- 화면 잠금/유휴(입력 없음 2분 이상) 시 캡처 중단, 타임라인에 `away`.
+- 구현: `sips`로 16×16 BMP로 줄여 밝기 지문을 만들고 직전 지문과 평균 밝기 차이를 비교한다(0~255, 2.5 미만이면 같은 화면). 같으면 스크린샷을 지우고 요약 호출 없이 직전 항목의 `repeats`만 늘린다. 링버퍼 20장이 "서로 다른 20개 장면"이 된다.
+- 유휴: `ioreg`의 `HIDIdleTime`으로 입력 없음 시간을 잰다. 입력이 2분 넘게 없으면 기록 간격을 3분(`idleIntervalMin`)으로 늘린다. 입력이 없어도 화면이 바뀌면(강의 영상 등) 그 간격으로 계속 기록하고, 입력도 화면 변화도 없이 5분(`autoPauseMin`)이 지나면 자동 일시정지한다. 화면 잠금(`ioreg`의 `CGSSessionScreenIsLocked`)은 즉시 일시정지. 잠금이 풀리고 입력이 생기면 잉키가 한마디 하고 재개한다.
+- 보관: 스크린샷은 개수(기본 20장)와 시간(기본 60분) 두 기준으로 자동 삭제한다. 텍스트 타임라인은 30일 보관.
 
 **1분 요약**
 - 새 캡처마다 요약 역할 모델에 이미지 1장 + 세션 목표 + 직전 요약 3개를 보내고 JSON으로 받는다 (OpenAI 호환은 `response_format: json_schema`, 미지원 모델은 프롬프트 지시 + 파싱 검증 후 1회 재시도).
@@ -335,7 +337,7 @@ interface LLMProvider {
 
 | 툴 | 설명 |
 |---|---|
-| `web_search(query, max_results≤10)` | Ollama Web Search API. 제목·URL·본문 일부 반환 |
+| `web_search(query, domain_type?)` | TinyFish Search API. 상위 6개 결과의 제목·URL·요약 반환 (구현됨) |
 | `web_fetch(url)` | Ollama Web Fetch API. 본문과 링크 반환 |
 | `image_search(query, n)` | Wikimedia Commons (+ Brave 키가 있으면 Brave). 썸네일 URL·출처·라이선스 반환, UI는 그리드로 렌더 |
 | `get_screenshot(ref)` | 링버퍼의 특정 시점 이미지 |
@@ -354,7 +356,7 @@ interface LLMProvider {
 1. 드래그&드롭 → 원본을 앱 데이터 폴더로 복사, SHA-256으로 중복 방지
 2. 파싱: PDF → 페이지별 텍스트 (스캔본이면 OCR 필요 경고), EPUB → 장별 Markdown, MD → 헤딩 단위로 분할
 3. 메타데이터: 제목/저자/DOI(PDF 첫 페이지), 토큰 수 추정
-4. 청크(약 800토큰, 페이지/장 경계 유지) → SQLite FTS5 색인. 임베딩은 선택: 로컬 Ollama 임베딩 모델(`/api/embed`)이 있으면 `sqlite-vec`에 저장해서 하이브리드 검색
+4. 청크(약 800토큰, 페이지/장 경계 유지) → SQLite FTS5 색인. 임베딩은 선택: 임베딩 API를 쓸 수 있으면 `sqlite-vec`에 저장해서 하이브리드 검색
 5. 상태 `ready`
 
 **답변에 쓰는 방식**
@@ -412,7 +414,7 @@ onTimelineEntry(e) {
 
 ### 5.9 프라이버시 & 보안
 
-- 스크린샷은 로컬에만 저장. 외부로는 1분 요약 호출과 질문 시점에만 나간다. 어느 제공자로 보내는지 설정 화면과 메뉴바에 표시한다. 완전 로컬을 원하면 모든 역할을 로컬 Ollama에 배정할 수 있다.
+- 스크린샷은 로컬에만 저장. 외부로는 1분 요약 호출과 질문 시점에만 나간다. 어느 제공자로 보내는지 설정 화면에 표시하고, 요약 기록 중에는 메뉴바에 🖋️●(일시정지 시 🖋️⏸)를 띄운다. 메뉴바에서 바로 일시정지할 수 있다.
 - 캡처 제외 목록 기본값: 1Password, 키체인 접근, 은행/증권 앱, 메신저(카카오톡/Slack/메시지), 시스템 설정. 활성 앱이 목록에 있으면 그 분은 캡처하지 않는다.
 - 즉시 일시정지: 전역 단축키(⌥⇧P, Electrobun `GlobalShortcut`), 메뉴바 클릭. 펫이 눈가리개 상태로 바뀐다.
 - 민감 화면 자동 폐기 (§5.4).
@@ -425,7 +427,7 @@ onTimelineEntry(e) {
 - 시스템 WebView(WKWebView)라서 Chromium 전용 API는 못 쓴다. 투명 배경은 `html, body { background: transparent }` 필요.
 - 투명 창 빈 영역의 클릭 통과는 창 크기를 펫 크기에 맞추는 방식으로 해결한다 (bunny 템플릿 방식). 말풍선이 열릴 때만 창을 키운다.
 - 구독 CLI(`claude`, `codex`)는 앱이 띄우는 자식 프로세스다. 앱 번들의 PATH에는 Homebrew 경로가 없을 수 있으므로 CLI 경로를 설정에서 지정하거나 자동 탐색한다 (`/opt/homebrew/bin`, `~/.local/bin`, `~/.npm-global/bin` 등).
-- Claude Agent SDK와 Codex SDK는 Node 기준으로 문서화되어 있다. M0에서 Bun에서의 동작(자식 프로세스 스트림)을 먼저 확인하고, 문제가 있으면 해당 어댑터만 Node 사이드카 프로세스로 분리한다.
+- Claude Agent SDK는 Bun에서 동작 확인 완료. Hutch 설치로도 플랫폼별 실행 파일 패키지가 깔린다. Codex SDK는 Node 기준이라 M2에서 Bun 동작을 확인하고, 문제가 있으면 Node 사이드카로 분리한다.
 - 잠금/절전/유휴 감지는 `ioreg`의 HIDIdleTime 폴링 또는 FFI로 구현.
 
 ### 5.11 프로젝트 구조 (제안)
@@ -468,8 +470,8 @@ Study_Pet/
 | 개입이 짜증나서 앱을 끄게 됨 | 보수적인 기본값, 시간당 상한, 👎 피드백으로 임계값 자동 완화, "오늘은 조용히" 모드 |
 | 관련도 오분류 (연구 중 웹 탐색을 딴짓으로 판정) | `related` 클래스, 세션 허용 목록, "이건 공부 맞아" 버튼 |
 | 구독 사용 한도 소진 / 로그인 만료 | 1분 요약은 구독을 쓰지 않음, 역할별 대체 제공자, 연결 테스트 버튼 |
-| 구독 CLI 응답 지연 (프로세스 시작 수 초) | 세션 동안 스레드/세션 재사용, 펫 thinking 애니메이션, 짧은 질문은 Ollama로 보내는 "빠른 답" 옵션 |
-| Ollama 모델마다 비전/툴 지원이 다름 | 연결 테스트로 기능을 확인해 모델별 capability 저장, 미지원이면 텍스트 요약으로 대체 |
+| 구독 CLI 응답 지연 (프로세스 시작 수 초) | 세션 동안 스레드/세션 재사용, 펫 thinking 애니메이션, 짧은 질문은 Haiku로 보내는 "빠른 답" 옵션 |
+| OpenAI 호환 모델마다 비전/툴 지원이 다름 | 연결 테스트로 기능을 확인해 모델별 capability 저장, 미지원이면 텍스트 요약으로 대체 |
 | Electrobun이 비교적 새 프레임워크 | M0에서 투명 창·캡처·트레이·단축키·자식 프로세스를 먼저 검증. 막히는 부분은 Bun FFI로 macOS API 직접 호출 |
 | `CGWindowListCreateImage` 지원 중단 | `screencapture` CLI 대체 경로를 함께 구현 |
 | 구독 로그인 사용 정책 | 개인용으로만 사용, 배포판은 API 키 모드 |
@@ -479,8 +481,8 @@ Study_Pet/
 ## 7. 결정이 필요한 사항 (기본값으로 진행 가능)
 
 1. **캐릭터**: 잉키(잉크 요정, 기본) / 루미(램프 나방) / 모스(이끼 거북)
-2. **주 답변 제공자 기본값**: Claude 구독(기본) / Codex 구독 / Ollama
-3. **1분 요약 모델**: Ollama Cloud(기본, 키 필요) / 로컬 Ollama(완전 오프라인, Mac 성능 필요)
+2. **주 답변 제공자 기본값**: Claude 구독(기본) / Codex 구독 / OpenAI 호환(Ollama Cloud 등)
+3. **1분 요약 모델**: Claude 구독 Sonnet으로 결정 (2026-11-06)
 4. **캡처 범위**: 세션 중에만(기본) / 항상
 5. **이미지 검색**: Wikimedia Commons(무료, 기본) / Brave 키 추가
 6. **말투**: 반말 친근형(기본) / 존댓말
@@ -489,7 +491,7 @@ Study_Pet/
 
 ## 8. 바로 다음 단계
 
-1. M0: Electrobun `bunny` 템플릿을 바탕으로 투명 펫 창 + 입력창 + Ollama(OpenAI 호환) 대화 + 현재 화면 1장 첨부 질문
-2. 같은 M0에서 Bun 환경의 Claude Agent SDK / Codex SDK 동작 확인 (가장 큰 기술 리스크)
+1. M0~M1 (진행 중): 투명 펫 창과 행동 애니메이션 + 입력창 + Claude 구독 대화 + 현재 화면 1장 첨부 질문 + 세션 기반 1분 Sonnet 화면 요약 타임라인 + 화면 변화 감지·자동 일시정지 + 먼저 말 걸기 (구현됨)
+2. Bun 환경의 Codex SDK 동작 확인
 3. 잉키 스프라이트 시안(idle/focus/curious/thinking) 제작
 4. 본인 화면 캡처 100장 라벨링으로 1분 요약 모델 선택

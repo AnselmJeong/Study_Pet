@@ -2,12 +2,35 @@
 // API 키가 Keychain에 있으면 그 키로 API 과금, 없으면 구독(claude.ai 로그인)으로 동작한다.
 // 개인용 전제: 남에게 배포하는 앱에서 claude.ai 구독 로그인을 제공하는 것은 허용되지 않는다.
 
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import { existsSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import type { ClaudeSettings, ModelInfo, TestResult } from "../../shared/types";
 import { dataDir } from "../settings";
-import type { CompleteRequest } from "./types";
+import type { AppTool, CompleteRequest } from "./types";
+
+const MCP_NAME = "studypet";
+
+/** 앱 도구를 인프로세스 MCP 서버로 노출한다 (내장 도구는 계속 꺼 둔다) */
+function mcpFor(tools: AppTool[]) {
+	return createSdkMcpServer({
+		name: MCP_NAME,
+		version: "0.1.0",
+		tools: tools.map((t) => {
+			const shape: Record<string, z.ZodTypeAny> = {};
+			for (const [k, p] of Object.entries(t.params)) {
+				let f: z.ZodTypeAny = p.enum?.length ? z.enum(p.enum as [string, ...string[]]) : z.string();
+				f = f.describe(p.description);
+				shape[k] = t.required.includes(k) ? f : f.optional();
+			}
+			return tool(t.name, t.description, shape, async (args) => ({
+				content: [{ type: "text" as const, text: await t.run(args as Record<string, unknown>) }],
+			}));
+		}),
+	});
+}
 
 const workDir = join(dataDir, "claude-cwd");
 if (!existsSync(workDir)) mkdirSync(workDir, { recursive: true });
@@ -20,6 +43,27 @@ export const CLAUDE_MODELS: ModelInfo[] = [
 	{ id: "claude-opus-5-5", label: "Claude Opus 5.5" },
 	{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
 ];
+
+// SDK는 내장 실행 파일을 import.meta.url 기준 node_modules에서 찾는다. /Applications의 앱 번들 옆에는
+// node_modules가 없어서 Bun 자동 설치 캐시(~/.bun/install/cache)에 기대게 되므로 믿을 수 없다.
+// 순서: 설정의 cliPath → 이 Mac에 설치된 `claude` → (개발 실행 시) node_modules의 SDK 내장 바이너리.
+function resolveExecutable(cfg: ClaudeSettings): string | undefined {
+	if (cfg.cliPath.trim()) return cfg.cliPath.trim();
+	const home = process.env.HOME ?? "";
+	const installed = [
+		`${home}/.local/bin/claude`,
+		"/opt/homebrew/bin/claude",
+		"/usr/local/bin/claude",
+		`${home}/.claude/local/claude`,
+	].find((p) => existsSync(p));
+	if (installed) return installed;
+	try {
+		const req = createRequire(import.meta.url);
+		const p = req.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/claude`);
+		if (existsSync(p)) return p;
+	} catch {}
+	return undefined; // SDK 기본 동작에 맡긴다
+}
 
 function childEnv(apiKey: string | null): Record<string, string | undefined> {
 	const env: Record<string, string | undefined> = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "study-pet/0.1" };
@@ -68,20 +112,28 @@ export async function claudeComplete(
 	const onAbort = () => abortController.abort();
 	req.signal?.addEventListener("abort", onAbort);
 
+	const exe = resolveExecutable(cfg);
 	const q = query({
 		prompt: singleMessage(req),
 		options: {
 			model: req.model || cfg.chatModel || "sonnet",
 			systemPrompt: req.system,
 			tools: [], // 내장 도구(Bash, Edit 등) 전부 끔: 답변만 한다
-			maxTurns: 1,
+			// 앱 도구(웹 검색)가 있으면 그것만 허용하고, 검색 후 답할 수 있게 턴을 몇 번 더 준다
+			...(req.tools?.length
+				? {
+						mcpServers: { [MCP_NAME]: mcpFor(req.tools) },
+						allowedTools: req.tools.map((t) => `mcp__${MCP_NAME}__${t.name}`),
+						maxTurns: 5,
+					}
+				: { maxTurns: 1 }),
 			persistSession: false,
 			settingSources: [],
 			includePartialMessages: Boolean(req.onDelta),
 			cwd: workDir,
 			env: childEnv(apiKey),
 			abortController,
-			...(cfg.cliPath.trim() ? { pathToClaudeCodeExecutable: cfg.cliPath.trim() } : {}),
+			...(exe ? { pathToClaudeCodeExecutable: exe } : {}),
 		},
 	});
 

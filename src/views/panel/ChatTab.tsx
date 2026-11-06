@@ -6,6 +6,7 @@ export function ChatTab() {
 	const { messages, busy } = useChat();
 	const [text, setText] = useState("");
 	const [attach, setAttach] = useState(true);
+	const [search, setSearch] = useState(false);
 	const [hint, setHint] = useState<string | null>(null);
 	const endRef = useRef<HTMLDivElement>(null);
 
@@ -20,7 +21,7 @@ export function ChatTab() {
 	async function submit() {
 		const t = text.trim();
 		if (!t) return;
-		const res = await api.ask({ text: t, attachScreen: attach });
+		const res = await api.ask({ text: t, attachScreen: attach, webSearch: search });
 		if (res.accepted) {
 			setText("");
 			setHint(null);
@@ -73,6 +74,10 @@ export function ChatTab() {
 					<label className="flex cursor-pointer items-center gap-1">
 						<input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
 						📷 현재 화면 같이 보내기
+					</label>
+					<label className="flex cursor-pointer items-center gap-1" title="답하기 전에 질문으로 웹 검색을 먼저 함 (꺼 둬도 잉키가 필요하면 알아서 검색)">
+						<input type="checkbox" checked={search} onChange={(e) => setSearch(e.target.checked)} />
+						🔎 웹 검색
 					</label>
 					<div className="flex items-center gap-3">
 						{hint && <span className="text-amber-600">{hint}</span>}
