@@ -49,6 +49,11 @@ export type ProactiveSettings = {
 	maxIntervalMin: number;
 	/** 농담 섞기 */
 	jokes: boolean;
+	/** 공부 세션이 아닐 때도 지금 화면을 한 장 찍어 보고 한마디 */
+	offSession: boolean;
+	/** 세션 밖에서 말 거는 간격 (분), 이 범위에서 무작위 */
+	offMinIntervalMin: number;
+	offMaxIntervalMin: number;
 };
 
 export type SearchSettings = {

@@ -41,7 +41,7 @@ const defaults: AppSettings = {
 		autoPauseMin: 5,
 		idleIntervalMin: 3,
 	},
-	proactive: { enabled: true, minIntervalMin: 12, maxIntervalMin: 25, jokes: true },
+	proactive: { enabled: true, minIntervalMin: 12, maxIntervalMin: 25, jokes: true, offSession: true, offMinIntervalMin: 20, offMaxIntervalMin: 40 },
 	search: { enabled: true, hasApiKey: false },
 	tone: "banmal",
 	petPackId: "inky",
@@ -113,6 +113,9 @@ export function saveSettings(
 	s.capture.idleIntervalMin = Math.max(1, Math.min(15, Math.round(s.capture.idleIntervalMin || 3)));
 	s.proactive.minIntervalMin = Math.max(3, Math.round(s.proactive.minIntervalMin || 12));
 	s.proactive.maxIntervalMin = Math.max(s.proactive.minIntervalMin, Math.round(s.proactive.maxIntervalMin || 25));
+	s.proactive.offSession = s.proactive.offSession !== false;
+	s.proactive.offMinIntervalMin = Math.max(5, Math.round(s.proactive.offMinIntervalMin || 20));
+	s.proactive.offMaxIntervalMin = Math.max(s.proactive.offMinIntervalMin, Math.round(s.proactive.offMaxIntervalMin || 40));
 	applyKey(CLAUDE_ACCOUNT, apiKeys?.claude);
 	applyKey(openaiAccount(s.openai), apiKeys?.openai);
 	applyKey(TINYFISH_ACCOUNT, apiKeys?.tinyfish);

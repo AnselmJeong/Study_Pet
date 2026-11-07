@@ -357,13 +357,28 @@ export function SettingsTab() {
 					농담도 섞기
 				</label>
 				<div className="grid grid-cols-2 gap-2">
-					<Field label="최소 간격 (분)">
+					<Field label="공부 중 최소 간격 (분)">
 						<input type="number" min={3} value={s.proactive.minIntervalMin} onChange={(e) => patch((d) => (d.proactive.minIntervalMin = Number(e.target.value)))} className={inputCls} />
 					</Field>
-					<Field label="최대 간격 (분)">
+					<Field label="공부 중 최대 간격 (분)">
 						<input type="number" min={3} value={s.proactive.maxIntervalMin} onChange={(e) => patch((d) => (d.proactive.maxIntervalMin = Number(e.target.value)))} className={inputCls} />
 					</Field>
 				</div>
+				<label className="flex items-center gap-2">
+					<input type="checkbox" checked={s.proactive.offSession} onChange={(e) => patch((d) => (d.proactive.offSession = e.target.checked))} />
+					공부 중이 아닐 때도 화면 보고 한마디
+				</label>
+				{s.proactive.offSession && (
+					<div className="grid grid-cols-2 gap-2">
+						<Field label="세션 밖 최소 간격 (분)">
+							<input type="number" min={5} value={s.proactive.offMinIntervalMin} onChange={(e) => patch((d) => (d.proactive.offMinIntervalMin = Number(e.target.value)))} className={inputCls} />
+						</Field>
+						<Field label="세션 밖 최대 간격 (분)">
+							<input type="number" min={5} value={s.proactive.offMaxIntervalMin} onChange={(e) => patch((d) => (d.proactive.offMaxIntervalMin = Number(e.target.value)))} className={inputCls} />
+						</Field>
+					</div>
+				)}
+				<p className="text-[11px] text-slate-400">말을 걸 때마다 지금 화면을 한 장 찍어 보고 바로 지운다. 기록(타임라인)에는 남기지 않는다. 화면이 잠겼거나, 5분 넘게 입력이 없거나, 제외 앱을 쓰는 중이면 건너뛴다.</p>
 			</Section>
 
 			<Section title="캐릭터">

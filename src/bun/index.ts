@@ -8,7 +8,7 @@ import {
 	Tray,
 	Utils,
 } from "electrobun/main";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { StudyPetRPC } from "../shared/rpc";
 import type { ChatMessage, PetMood } from "../shared/types";
@@ -17,12 +17,13 @@ import * as context from "./context";
 import { hasScreenPermission, requestScreenPermission } from "./capture";
 import * as attach from "./attachments";
 import { currentCharacter } from "./character";
+import { appLog } from "./log";
 import { vocative } from "../shared/character";
 import { supportsVision } from "./llm/router";
 import { testSearch } from "./search";
 import { CLAUDE_MODELS, claudeTest } from "./llm/claudeSub";
 import { listModels, testConnection } from "./llm/openaiCompat";
-import { claudeApiKey, dataDir, getSettings, openaiApiKey, saveSettings, setPetAnchor, setPetPackId } from "./settings";
+import { claudeApiKey, getSettings, openaiApiKey, saveSettings, setPetAnchor, setPetPackId } from "./settings";
 import * as packs from "./packs";
 import { INKY_ID, PACK_ID } from "../shared/pack";
 
@@ -97,6 +98,7 @@ context.init({
 	},
 	mood: (mood) => send("mood", { mood }),
 	isChatBusy: () => chat.isBusy(),
+	hideForCapture: () => hideWindowsForCapture(),
 });
 
 // ---------- RPC ----------
@@ -412,26 +414,30 @@ function characterChanged() {
 
 let attachCapturing = false;
 
+/** 캡처에 펫·패널이 찍히지 않게 숨기고, 다시 보이게 하는 함수를 돌려준다.
+ *  focusFrom이 없으면(펫이 먼저 말 걸 때) 포커스를 가져오지 않는다 */
+async function hideWindowsForCapture(focusFrom?: "pet" | "panel"): Promise<() => void> {
+	const petShown = Boolean(petWin?.isVisible());
+	const panelShown = Boolean(panelWin?.isVisible());
+	petWin?.hide();
+	panelWin?.hide();
+	await Bun.sleep(250); // 창이 실제로 사라질 때까지
+	return () => {
+		if (petShown && petWin) {
+			petWin.show();
+			petWin.setAlwaysOnTop(true);
+		}
+		if (panelShown && panelWin) panelWin.show();
+		if (focusFrom) (focusFrom === "panel" && panelShown ? panelWin : petWin)?.focus();
+	};
+}
+
 /** 펫(과 패널)을 숨기고 찍은 다음, 원래대로 보이게 한다 */
 async function captureForAttach(mode: "screen" | "region", from: "pet" | "panel") {
 	if (attachCapturing) return { ok: false as const, reason: "failed" as const, message: "이미 찍는 중이야" };
 	attachCapturing = true;
 	try {
-		return await attach.addFromCapture(mode, async () => {
-			const petShown = Boolean(petWin?.isVisible());
-			const panelShown = Boolean(panelWin?.isVisible());
-			petWin?.hide();
-			panelWin?.hide();
-			await Bun.sleep(250); // 창이 실제로 사라질 때까지
-			return () => {
-				if (petShown && petWin) {
-					petWin.show();
-					petWin.setAlwaysOnTop(true);
-				}
-				if (panelShown && panelWin) panelWin.show();
-				(from === "panel" && panelShown ? panelWin : petWin)?.focus();
-			};
-		});
+		return await attach.addFromCapture(mode, () => hideWindowsForCapture(from));
 	} finally {
 		attachCapturing = false;
 	}
@@ -641,12 +647,8 @@ createPetWindow();
 // 화면 기록 권한이 없으면 (재설치하면 ad-hoc 서명이 바뀌어 권한이 풀린다) 한 번 알려 준다
 const screenOk = hasScreenPermission();
 console.log(`[study-pet] 화면 기록 권한: ${screenOk ? "있음" : "없음"}`);
-try {
-	// 진단용: 실행할 때마다 권한 상태를 남긴다 (userData/inky.log, 200줄 넘으면 앞부분 버림)
-	const logPath = join(dataDir, "inky.log");
-	const prev = existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n").filter(Boolean).slice(-199) : [];
-	writeFileSync(logPath, [...prev, `${new Date().toISOString()} start v${appVersion()} screenPermission=${screenOk}`].join("\n") + "\n");
-} catch {}
+// 진단용: 실행할 때마다 권한 상태를 남긴다 (userData/inky.log)
+appLog(`start v${appVersion()} screenPermission=${screenOk}`);
 if (!screenOk) {
 	setTimeout(() => {
 		const line =

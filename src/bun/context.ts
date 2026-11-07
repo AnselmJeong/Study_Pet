@@ -7,7 +7,17 @@ import { join } from "node:path";
 import type { Activity, CaptureState, PetMood, Relevance, TimelineEntry } from "../shared/types";
 import { currentCharacter } from "./character";
 import { personaLines } from "./llm/prompt";
-import { captureScreen, deleteShot, fingerprint, fingerprintDiff, frontmostApp, idleSeconds, screenLocked } from "./capture";
+import {
+	captureScreen,
+	deleteShot,
+	fingerprint,
+	fingerprintDiff,
+	frontmostApp,
+	hasScreenPermission,
+	idleSeconds,
+	screenLocked,
+} from "./capture";
+import { appLog } from "./log";
 import { complete, supportsVision } from "./llm/router";
 import { dataDir, getSettings } from "./settings";
 
@@ -22,7 +32,12 @@ export type ContextEvents = {
 	mood: (m: PetMood) => void;
 	/** 사용자가 질문 중이거나 답을 받는 중이면 펫이 먼저 말을 걸지 않는다 */
 	isChatBusy: () => boolean;
+	/** 펫·패널을 숨기고(캡처에 안 찍히게), 다시 보이게 하는 함수를 돌려준다 */
+	hideForCapture: () => Promise<() => void>;
 };
+
+/** 말 걸기·질문에 넘기는 화면 기록은 이 시간 안의 것만 (몇 시간 전 공부 내용을 끌어오지 않게) */
+export const RECENT_CONTEXT_MS = 15 * 60_000;
 
 let ev: ContextEvents | null = null;
 const state: CaptureState = { running: false, paused: false, goal: "", startedAt: null, lastCaptureAt: null };
@@ -81,9 +96,10 @@ export function getTimeline(): TimelineEntry[] {
 	return timeline;
 }
 
-/** 질문 답변용: 최근 n개의 요약 텍스트 */
-export function recentSummaries(n = 20): string {
-	const recent = timeline.filter((e) => !e.skipped && !e.error).slice(-n);
+/** 질문 답변용: 최근 n개의 요약 텍스트. maxAgeMs를 주면 그보다 오래된 기록은 뺀다 (타임라인 자체는 그대로) */
+export function recentSummaries(n = 20, maxAgeMs?: number): string {
+	const cutoff = maxAgeMs ? Date.now() - maxAgeMs : 0;
+	const recent = timeline.filter((e) => !e.skipped && !e.error && e.ts >= cutoff).slice(-n);
 	if (!recent.length) return "";
 	return recent
 		.map((e) => {
@@ -104,6 +120,7 @@ export function start(goal: string) {
 	ev?.captureState(getState());
 	ev?.mood("focus");
 	void tick(); // 바로 첫 캡처
+	scheduleProactive(); // 세션 안 간격으로
 }
 
 export function stop() {
@@ -116,6 +133,7 @@ export function stop() {
 	captureTimer = null;
 	ev?.captureState(getState());
 	ev?.mood("idle");
+	scheduleProactive(); // 세션 밖 간격으로
 }
 
 /** 입력이 없으면(영상 시청, 자리 비움) 간격을 늘려서 캡처와 요약 호출을 줄인다 */
@@ -328,8 +346,11 @@ function maybeNudge() {
 function scheduleProactive() {
 	if (proactiveTimer) clearTimeout(proactiveTimer);
 	const p = getSettings().proactive;
-	const min = Math.max(3, p.minIntervalMin);
-	const max = Math.max(min, p.maxIntervalMin);
+	// 세션 밖에서는 더 긴 간격 (기본 20~40분)
+	const lo = state.running ? p.minIntervalMin : p.offMinIntervalMin;
+	const hi = state.running ? p.maxIntervalMin : p.offMaxIntervalMin;
+	const min = Math.max(3, lo);
+	const max = Math.max(min, hi);
 	const delay = (min + Math.random() * (max - min)) * 60_000;
 	proactiveTimer = setTimeout(() => {
 		void proactiveTick().finally(scheduleProactive);
@@ -341,52 +362,122 @@ export function rescheduleProactive() {
 	scheduleProactive();
 }
 
-/** 메뉴에서 바로 말 걸기 (격려 또는 농담) */
+type SpeakKind = "encourage" | "joke" | "break" | "nudge";
+
+/** 지금 말을 걸면 안 되는 이유 (없으면 null). 화면을 찍기 전에 확인한다 */
+function proactiveBlock(): string | null {
+	if (ev?.isChatBusy()) return "chat-busy";
+	if (screenLocked()) return "locked";
+	if (idleSeconds() > 5 * 60) return "idle";
+	if (!hasScreenPermission()) return "no-permission";
+	const app = frontmostApp();
+	const excluded = getSettings().capture.excludedApps.find((x) => x && app.toLowerCase().includes(x.toLowerCase()));
+	if (excluded) return "excluded-app";
+	return null;
+}
+
+let oneOffBusy = false;
+
+/** 말 걸기용으로 지금 화면을 한 장 찍는다. 타임라인·세션 통계에는 넣지 않고, 다 쓰면 바로 지운다 */
+async function captureOneOff(): Promise<string | null> {
+	if (oneOffBusy || !ev) return null;
+	oneOffBusy = true;
+	let restore: (() => void) | null = null;
+	try {
+		restore = await ev.hideForCapture();
+		const shot = await captureScreen(); // screencapture + sips -Z 1568
+		return shot?.path ?? null;
+	} catch (err) {
+		console.error("[proactive] 캡처 실패", err);
+		return null;
+	} finally {
+		restore?.();
+		oneOffBusy = false;
+	}
+}
+
+/** 메뉴에서 바로 말 걸기 (격려 또는 농담). 지금 화면을 보고 한다 */
 export async function speakNow() {
-	if (ev?.isChatBusy()) return;
-	await speak(getSettings().proactive.jokes && Math.random() < 0.4 ? "joke" : "encourage", "");
+	const block = proactiveBlock();
+	// 직접 부른 것이니 잠금·입력 없음은 무시하지만, 대화 중이면 끼어들지 않는다
+	if (block === "chat-busy") return;
+	const kind: SpeakKind = getSettings().proactive.jokes && Math.random() < 0.4 ? "joke" : "encourage";
+	// 제외 앱이거나 권한이 없으면 화면 없이 가볍게 한마디만
+	const canLook = block !== "excluded-app" && block !== "no-permission";
+	await speakWithFreshShot(kind, "", canLook, "menu");
 }
 
 async function proactiveTick() {
 	const p = getSettings().proactive;
-	if (!p.enabled || ev?.isChatBusy()) return;
-	if (idleSeconds() > 5 * 60) return; // 자리에 없으면 말 걸지 않음
+	if (!p.enabled) return;
+	if (!state.running && !p.offSession) return;
+	const block = proactiveBlock();
+	if (block) {
+		appLog(`proactive skip reason=${block} session=${state.running}`);
+		return;
+	}
 	const minutes = state.startedAt ? (Date.now() - state.startedAt) / 60_000 : 0;
-	let kind: "encourage" | "joke" | "break";
+	let kind: SpeakKind;
 	if (state.running && minutes > 50 && Math.random() < 0.6) kind = "break";
 	else if (p.jokes && Math.random() < 0.35) kind = "joke";
 	else kind = "encourage";
-	await speak(kind, "");
+	await speakWithFreshShot(kind, "", true, "timer");
 }
 
-async function speak(kind: "encourage" | "joke" | "break" | "nudge", extra: string) {
+/** 지금 화면을 찍어 넘기고, 말한 뒤에는 바로 지운다 */
+async function speakWithFreshShot(kind: SpeakKind, extra: string, look: boolean, via: string) {
+	const s = getSettings();
+	const shot = look && supportsVision("summary", s) ? await captureOneOff() : null;
+	appLog(`proactive ${via} kind=${kind} session=${state.running} shot=${shot ? "captured" : "none"}`);
+	try {
+		await speak(kind, extra, shot);
+	} finally {
+		if (shot) {
+			deleteShot(shot);
+			appLog(`proactive shot deleted=${!existsSync(shot)}`);
+		}
+	}
+}
+
+async function speak(kind: SpeakKind, extra: string, shotPath: string | null = null) {
 	const s = getSettings();
 	const minutes = state.startedAt ? Math.round((Date.now() - state.startedAt) / 60_000) : 0;
-	const ask: Record<typeof kind, string> = {
-		encourage:
-			"지금 사용자가 하는 일을 보고, 구체적이고 짧은 격려 한마디를 해줘. 막연한 칭찬 말고 화면에서 본 내용이나 진행 상황을 짚어서.",
-		joke: "지금 사용자가 공부하는 주제와 관련된 짧고 가벼운 농담이나 재밌는 사실 하나를 건네줘. 썰렁해도 괜찮아. 공부 흐름을 끊지 않게 한 문장.",
-		break: `사용자가 ${minutes}분째 집중하고 있어. 잠깐 스트레칭이나 물 마시기를 권하는 한마디를 해줘.`,
+	const now = shotPath ? "첨부한 지금 화면" : "지금 상황";
+	const ask: Record<SpeakKind, string> = {
+		encourage: `${now}을 보고, 사용자가 바로 지금 하는 일에 맞춘 짧은 격려나 가벼운 한마디를 해줘. 막연한 칭찬 말고 화면에 보이는 것을 구체적으로 짚어서.`,
+		joke: `${now}에 보이는 것과 관련된 짧고 가벼운 농담이나 재밌는 사실 하나를 건네줘. 썰렁해도 괜찮아. 하던 일의 흐름을 끊지 않게 한 문장.`,
+		break: `사용자가 ${minutes}분째 집중하고 있어. ${shotPath ? "지금 화면을 살짝 짚으면서 " : ""}잠깐 스트레칭이나 물 마시기를 권하는 한마디를 해줘.`,
 		nudge:
 			"사용자가 몇 분째 목표와 무관한 화면에 있어. 꾸짖지 말고, 아까 하던 지점을 구체적으로 짚으면서 돌아갈지 부드럽게 물어봐.",
 	};
+	// 세션 중에도 최근 15분 기록만. 세션 밖이면 기록을 아예 넘기지 않는다 (지금 화면만 보고 말한다)
+	const recent = state.running ? recentSummaries(8, RECENT_CONTEXT_MS) : "";
 	try {
 		ev?.mood("thinking");
 		const text = await complete("summary", {
 			system: [
 				...personaLines(currentCharacter()),
-				"지금은 사용자의 공부를 옆에서 응원하는 한마디를 건넨다.",
+				state.running
+					? "지금은 사용자의 공부를 옆에서 응원하는 한마디를 건넨다."
+					: "지금은 사용자가 컴퓨터로 하는 일을 옆에서 보다가 가볍게 한마디 건넨다. 공부 중이라고 가정하지 않는다.",
 				s.tone === "banmal" ? "반말로 친근하게 말한다." : "존댓말로 다정하게 말한다.",
 				"말풍선에 들어갈 한두 문장만 출력한다. 따옴표나 머리말 없이 본문만.",
 				"퀴즈를 내거나 학습 내용을 확인하는 질문은 하지 않는다. 죄책감을 주는 표현은 쓰지 않는다.",
+				...(shotPath
+					? [
+							"첨부한 스크린샷은 바로 지금 사용자의 화면이다. 이 화면에 반응한다. 예전에 하던 일이나 몇 시간 전 내용은 꺼내지 않는다.",
+							"화면에 비밀번호, 은행·결제 정보, 개인 메시지 같은 민감한 내용이 보이면 그 내용은 전혀 언급하지 말고 일반적인 다정한 한마디만 한다.",
+						]
+					: ["화면을 볼 수 없으니 화면 내용을 지어내지 말고 일반적인 다정한 한마디를 한다."]),
 			].join("\n"),
 			history: [],
-			images: [],
+			images: shotPath ? [shotPath] : [],
 			maxTokens: 200,
 			userText: [
-				`세션 목표: ${state.goal || "(정하지 않음)"}`,
+				state.running ? `세션 목표: ${state.goal || "(정하지 않음)"}` : "",
 				state.running ? `세션 진행: ${minutes}분` : "공부 세션은 시작하지 않은 상태",
-				`최근 화면 기록:\n${recentSummaries(8) || "(기록 없음)"}`,
+				recent ? `최근 15분 화면 기록 (참고만):\n${recent}` : "",
+				shotPath ? "[지금 화면 스크린샷 1장 첨부]" : "",
 				extra,
 				"",
 				ask[kind],
@@ -400,6 +491,7 @@ async function speak(kind: "encourage" | "joke" | "break" | "nudge", extra: stri
 		setTimeout(() => ev?.mood(state.running ? "focus" : "idle"), 2500);
 	} catch (err) {
 		console.error("[proactive] 말 걸기 실패", err);
+		appLog(`proactive speak failed: ${String(err).slice(0, 120)}`);
 		ev?.mood(state.running ? "focus" : "idle");
 	}
 }

@@ -96,7 +96,8 @@ export async function ask(
 
 	const character = currentCharacter();
 	const cs = context.getState();
-	const timeline = context.recentSummaries(20);
+	// 세션 밖 질문에는 최근 15분 기록만 붙인다 (몇 시간 전 공부 내용을 끌어오지 않게). 타임라인 자체는 그대로
+	const timeline = context.recentSummaries(20, cs.running ? undefined : context.RECENT_CONTEXT_MS);
 	const userText = [
 		cs.goal ? `[세션 목표] ${cs.goal}` : "",
 		timeline ? `[최근 화면 기록]\n${timeline}` : "",
