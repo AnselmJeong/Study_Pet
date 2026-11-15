@@ -17,7 +17,11 @@ export type PackStateName =
 	| "hop"
 	| "stretch"
 	| "spin"
-	| "look";
+	| "look"
+	| "pat"
+	| "dizzy"
+	| "look-left"
+	| "look-right";
 
 export const PACK_STATES: PackStateName[] = [
 	"idle",
@@ -34,13 +38,22 @@ export const PACK_STATES: PackStateName[] = [
 	"stretch",
 	"spin",
 	"look",
+	"pat",
+	"dizzy",
+	"look-left",
+	"look-right",
 ];
 
 /** 없는 상태는 이 순서대로 대신 그린다 (마지막은 늘 idle) */
 const FALLBACK: Partial<Record<PackStateName, PackStateName[]>> = {
 	focus: ["read"],
 	wave: ["happy"],
+	pat: ["happy"],
+	dizzy: ["spin"],
 };
+
+/** 클릭에 대한 짧은 반응 (펫 창) */
+export type PetReaction = "pat" | "dizzy";
 
 /** pack.json의 상태 하나: "파일", "폴더/", 또는 객체 */
 export type PackStateSpec =
@@ -67,6 +80,8 @@ export type PackManifest = {
 	height?: number;
 	fps?: number;
 	motion?: boolean;
+	/** 이미지 위에서부터 이 비율까지를 머리로 본다 (머리 클릭 = 쓰다듬기). 0.15~0.9, 기본 0.5 */
+	head?: number;
 	/** 캐릭터 소개 (대화 프롬프트에 들어감). 없으면 이름만 바꾼 기본 성격 */
 	persona?: string;
 	/** 말투 지시 (예: "느긋하고 다정한 반말, 가끔 차 이야기") */
@@ -91,6 +106,8 @@ export type ResolvedPack = {
 	description?: string;
 	height: number;
 	motion: boolean;
+	/** 머리로 볼 위쪽 비율 */
+	head?: number;
 	preview?: string;
 	states: Partial<Record<PackStateName, ResolvedState>>;
 };
@@ -202,6 +219,7 @@ export function resolvePack(raw: unknown, files: PackFiles): { pack?: ResolvedPa
 			description: m.description,
 			height: Math.max(80, Math.min(260, Math.round(m.height ?? 140))),
 			motion: m.motion ?? true,
+			head: typeof m.head === "number" && Number.isFinite(m.head) ? Math.max(0.15, Math.min(0.9, m.head)) : undefined,
 			preview,
 			states,
 		},
@@ -209,8 +227,16 @@ export function resolvePack(raw: unknown, files: PackFiles): { pack?: ResolvedPa
 	};
 }
 
-/** 펫의 감정과 행동 → 그릴 상태 */
-export function stateFor(mood: PetMood, action: PetAction): PackStateName {
+/**
+ * 펫의 감정과 행동 → 그릴 상태.
+ * reaction(쓰다듬기, 어지러움)이 가장 우선이고, 가만히 있을 때는 look(-1 왼쪽, 1 오른쪽)으로 커서 쪽을 본다.
+ */
+export function stateFor(
+	mood: PetMood,
+	action: PetAction,
+	extra: { reaction?: PetReaction | null; look?: -1 | 0 | 1 } = {},
+): PackStateName {
+	if (extra.reaction) return extra.reaction;
 	switch (action) {
 		case "doze":
 			return "sleep";
@@ -236,7 +262,7 @@ export function stateFor(mood: PetMood, action: PetAction): PackStateName {
 		case "focus":
 			return "focus";
 		default:
-			return "idle";
+			return extra.look === -1 ? "look-left" : extra.look === 1 ? "look-right" : "idle";
 	}
 }
 

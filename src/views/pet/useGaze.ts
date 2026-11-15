@@ -23,7 +23,12 @@ export type GazeOptions = {
 	active: boolean;
 	/** 0..1 시선 세기 (공부 세션 중엔 은은하게) */
 	strength: number;
+	/** 커서가 확실히 왼쪽(-1)이나 오른쪽(1)에 있을 때 알려 준다. 바뀔 때만 부른다 */
+	onSide?: (side: -1 | 0 | 1) => void;
 };
+/** 옆을 보기 시작하는 값과 정면으로 돌아오는 값 (깜빡거림 방지) */
+const SIDE_ON = 0.45;
+const SIDE_OFF = 0.25;
 
 export function useGaze(ref: RefObject<HTMLElement | null>, opts: GazeOptions) {
 	const optsRef = useRef(opts);
@@ -37,6 +42,7 @@ export function useGaze(ref: RefObject<HTMLElement | null>, opts: GazeOptions) {
 		const g = { x: 0, y: 0 };
 		let raf = 0;
 		let last = 0;
+		let side: -1 | 0 | 1 = 0;
 
 		const target = () => {
 			const el = ref.current;
@@ -77,6 +83,11 @@ export function useGaze(ref: RefObject<HTMLElement | null>, opts: GazeOptions) {
 			if (settled) {
 				g.x = t.x;
 				g.y = t.y;
+			}
+			const next: -1 | 0 | 1 = Math.abs(g.x) >= SIDE_ON ? (g.x < 0 ? -1 : 1) : Math.abs(g.x) <= SIDE_OFF ? 0 : side;
+			if (next !== side) {
+				side = next;
+				optsRef.current.onSide?.(side);
 			}
 			const el = ref.current;
 			if (el) {

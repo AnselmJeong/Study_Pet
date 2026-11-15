@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CaptureState, PetAction, PetMood } from "../../shared/types";
-import { PetCharacter } from "../common/PetCharacter";
+import { PetBody, usePetPack } from "../common/PetCharacter";
 import { api, on } from "../common/rpc";
 import { useChat } from "../common/useChat";
 import { useCharacter } from "../common/useCharacter";
@@ -9,7 +9,7 @@ import { useGaze } from "./useGaze";
 
 const BUBBLE_HIDE_MS = 15_000;
 const PAD = 8;
-/** 캐릭터 위에서부터 이 비율까지를 머리로 본다 (머리 클릭 = 쓰다듬기) */
+/** 캐릭터 위에서부터 이 비율까지를 머리로 본다 (머리 클릭 = 쓰다듬기). 팩의 head 값이 있으면 그걸 쓴다 */
 const HEAD_RATIO = 0.5;
 /** 이 시간 안에 이만큼 클릭하면 어지러워한다 */
 const BURST_MS = 1000;
@@ -94,6 +94,9 @@ export function PetApp() {
 	const inputBeforeBurst = useRef(false);
 	const lastTouch = useRef(0);
 	const [dragging, setDragging] = useState(false);
+	const [look, setLook] = useState<-1 | 0 | 1>(0);
+	const pack = usePetPack();
+	const headRatio = pack?.head ?? HEAD_RATIO;
 
 	const openInput = () => {
 		setInputOpen(true);
@@ -104,6 +107,7 @@ export function PetApp() {
 	useGaze(petRef, {
 		active: !dragging && action !== "doze" && action !== "read",
 		strength: capture.running ? 0.6 : 1,
+		onSide: setLook,
 	});
 
 	const last = [...messages].reverse().find((m) => m.role === "assistant");
@@ -223,7 +227,7 @@ export function PetApp() {
 		endDrag(false);
 		e.currentTarget.setPointerCapture(e.pointerId);
 		const r = e.currentTarget.getBoundingClientRect();
-		const headHit = r.height > 0 && (e.clientY - r.top) / r.height < HEAD_RATIO;
+		const headHit = r.height > 0 && (e.clientY - r.top) / r.height < headRatio;
 		drag.current = { pointerId: e.pointerId, x: e.screenX, y: e.screenY, moved: false, raf: 0, dx: 0, dy: 0, headHit };
 		void api.dragPet({ phase: "start" }).catch(() => {});
 	}
@@ -410,7 +414,7 @@ export function PetApp() {
 					title="클릭: 물어보기 · 머리 클릭: 쓰다듬기 · 드래그: 이동"
 				>
 					<div className="pet-gaze">
-						<PetCharacter mood={shownMood} action={action} size={110} />
+						<PetBody pack={pack} mood={shownMood} action={action} size={110} reaction={reaction?.kind} look={look} />
 					</div>
 					{reaction && (
 						<div key={reaction.key} className="pet-fx" aria-hidden>
