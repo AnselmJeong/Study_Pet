@@ -119,7 +119,8 @@ export function useGaze(ref: RefObject<HTMLElement | null>, opts: GazeOptions) {
 			wake();
 		};
 		const onPointer = (e: PointerEvent) => moved({ x: e.clientX, y: e.clientY });
-		const off = on("cursor", moved);
+		// bun은 화면 좌표를 보낸다. 창 기준으로 바꾼다
+		const off = on("cursor", (p) => moved({ x: p.x - window.screenX, y: p.y - window.screenY }));
 		window.addEventListener("pointermove", onPointer);
 		return () => {
 			off();
