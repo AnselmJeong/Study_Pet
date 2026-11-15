@@ -53,10 +53,16 @@ export const api = electrobun.rpc!.request;
 /** WebView 기본 우클릭 메뉴(새로 고침, 요소 검사)를 막고 앱 메뉴를 띄운다 */
 export function installContextMenu(where: "pet" | "panel") {
 	window.addEventListener("contextmenu", (e) => {
-		e.preventDefault();
 		const t = e.target as HTMLElement | null;
 		const editable = Boolean(t?.closest?.("input, textarea, [contenteditable=''], [contenteditable='true']"));
 		const hasSelection = Boolean(window.getSelection()?.toString());
+		// 펫 창: 앱 메뉴를 띄우지 않는다. 커서 따라 보기와 함께 쓰면 메뉴 항목이 동작하지 않았다.
+		// 같은 명령은 메뉴 막대 아이콘에 있다. 입력창·선택한 글에서는 WebView 기본 편집 메뉴를 쓴다
+		if (where === "pet") {
+			if (!editable && !hasSelection) e.preventDefault();
+			return;
+		}
+		e.preventDefault();
 		void api.showContextMenu({ where, editable, hasSelection }).catch(() => {});
 	});
 }

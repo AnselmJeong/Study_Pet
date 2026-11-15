@@ -6,7 +6,7 @@ PC로 공부하거나 연구하는 동안 화면 구석에서 같이 있어 주�
 - 투명·항상 위 펫 창 (잉키), 클릭하면 입력창, 드래그로 이동. 가만히 있을 때 깡총, 두리번, 기지개, 책 읽기, 손 흔들기, 졸기, 빙글, 화면 위 걷기 등을 한다
 - 질문에 이미지를 붙여서 답변 (스트리밍, 공부 세션과 상관없이 언제든)
   - **📷 화면**: 누르는 즉시 지금 화면을 찍어 미리보기로 붙인다 (캐릭터는 잠깐 숨는다)
-  - **✂︎ 영역**: 드래그로 영역을, 스페이스로 창을 골라 찍는다 (Esc 취소). 메뉴바·우클릭의 "영역 찍어서 물어보기"도 같다
+  - **✂︎ 영역**: 드래그로 영역을, 스페이스로 창을 골라 찍는다 (Esc 취소). 메뉴바의 "영역 찍어서 물어보기"도 같다
   - 이미지 붙여넣기(⌘V)·끌어놓기, 최대 4장. 미리보기의 ✕로 뺀다. 답을 받으면 파일을 지운다 (`attachments/`)
   - 화면 기록 권한이 없으면 질문을 보내지 않고 "설정 열기" 버튼을 보여 준다. 이미지를 못 보는 모델이면 보내기 전에 알려 준다
 - 캐릭터 팩마다 이름(`name`)과 선택 항목 `persona`·`speech`가 있고, 대화·메뉴·패널이 고른 캐릭터 이름을 쓴다 (앱 이름은 Inky)
@@ -67,7 +67,7 @@ open "/Applications/Inky.app"
 - 아이콘: `assets/icon.svg`(잉키) → `scripts/make-icon.sh` → `assets/icon.iconset` (electrobun.config.ts의 `build.mac.icons`).
 - stable 데이터 폴더: `~/Library/Application Support/dev.anselm.studypet/stable/` (dev는 `.../dev/`).
 - 앱 이름은 Inky(번들 ID dev.anselm.studypet, Keychain 서비스도 동일). 개발 실행은 Inky-dev.
-- 펫/패널 창 우클릭은 WebView 기본 메뉴 대신 앱 메뉴(ContextMenu)를 띄운다.
+- 패널 창 우클릭은 WebView 기본 메뉴 대신 앱 메뉴(ContextMenu)를 띄운다. 펫 창 우클릭은 아무것도 띄우지 않는다(입력창·선택한 글에서는 기본 편집 메뉴). 커서 따라 보기와 같이 쓰면 메뉴 항목이 동작하지 않아서 뺐고, 같은 명령은 메뉴 막대 아이콘에 있다.
 - 서명: `scripts/make-signing-cert.sh`가 자체 서명 코드서명 인증서(CN `Inky Local Signing`, 10년, codeSigning 용도)를 로그인 키체인에 만든다. 개인 키는 임시 폴더에서만 만들고 지운다. 같은 ID로 서명하면 재설치해도 화면 기록 권한이 유지된다 (처음 한 번만 다시 허용). 시스템 신뢰 설정은 필요 없다.
 - 서명 ID가 없으면 install-app.sh는 경고를 띄우고 ad-hoc(`-`)으로 서명한다. 이때는 재설치할 때마다 화면 기록 권한을 다시 켜야 할 수 있다.
 - 확인: `codesign -dv --verbose=4 /Applications/Inky.app 2>&1 | grep Authority` → `Authority=Inky Local Signing`
