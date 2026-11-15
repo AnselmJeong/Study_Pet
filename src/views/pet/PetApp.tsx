@@ -5,9 +5,25 @@ import { api, on } from "../common/rpc";
 import { useChat } from "../common/useChat";
 import { useCharacter } from "../common/useCharacter";
 import { AttachStrip, CaptureButtons, useAttachments } from "../common/attachments";
+import { useGaze } from "./useGaze";
 
 const BUBBLE_HIDE_MS = 15_000;
 const PAD = 8;
+/** 캐릭터 위에서부터 이 비율까지를 머리로 본다 (머리 클릭 = 쓰다듬기) */
+const HEAD_RATIO = 0.5;
+/** 이 시간 안에 이만큼 클릭하면 어지러워한다 */
+const BURST_MS = 1000;
+const BURST_CLICKS = 3;
+/** 만진 뒤 이 시간 동안은 혼자 하는 행동을 쉰다 */
+const QUIET_AFTER_TOUCH_MS = 6000;
+const PAT_LINES = ["헤헤", "좋아~", "기분 좋다!", "히히, 간지러워"];
+const DIZZY_LINES = ["어지러워…", "그만 그만!", "빙글빙글~"];
+
+type Reaction = { kind: "pat" | "dizzy"; line: string; key: number };
+
+function pick<T>(list: T[]): T {
+	return list[Math.floor(Math.random() * list.length)];
+}
 
 /** 가만히 있을 때 고를 행동과 가중치 */
 function pickAction(mood: PetMood, running: boolean): PetAction {
@@ -69,8 +85,15 @@ export function PetApp() {
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const petRef = useRef<HTMLDivElement>(null);
 	/** 왼쪽 버튼으로 누른 동안만 살아 있는 드래그 상태 */
-	const drag = useRef<{ pointerId: number; x: number; y: number; moved: boolean; raf: number; dx: number; dy: number } | null>(null);
+	const drag = useRef<{ pointerId: number; x: number; y: number; moved: boolean; raf: number; dx: number; dy: number; headHit: boolean } | null>(null);
 	const walkDir = useRef<1 | -1>(-1);
+	const [reaction, setReaction] = useState<Reaction | null>(null);
+	const reactTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	/** 최근 클릭 시각과, 연타가 시작되기 전 입력창 상태 */
+	const clicks = useRef<number[]>([]);
+	const inputBeforeBurst = useRef(false);
+	const lastTouch = useRef(0);
+	const [dragging, setDragging] = useState(false);
 
 	const openInput = () => {
 		setInputOpen(true);
@@ -78,6 +101,10 @@ export function PetApp() {
 	};
 	const att = useAttachments({ from: "pet", onIncoming: openInput });
 	const character = useCharacter();
+	useGaze(petRef, {
+		active: !dragging && action !== "doze" && action !== "read",
+		strength: capture.running ? 0.6 : 1,
+	});
 
 	const last = [...messages].reverse().find((m) => m.role === "assistant");
 
@@ -120,6 +147,7 @@ export function PetApp() {
 		const loop = () => {
 			t = setTimeout(async () => {
 				if (cancelled) return;
+				if (Date.now() - lastTouch.current < QUIET_AFTER_TOUCH_MS) return loop();
 				const a = pickAction(mood, capture.running);
 				setAction(a);
 				if (a === "walk") {
@@ -183,8 +211,9 @@ export function PetApp() {
 		cancelAnimationFrame(d.raf);
 		const el = petRef.current;
 		if (el?.hasPointerCapture?.(d.pointerId)) el.releasePointerCapture(d.pointerId);
+		setDragging(false);
 		void api.dragPet({ phase: "end" }).catch(() => {});
-		if (asClick && !d.moved) onPetClick();
+		if (asClick && !d.moved) onPetClick(d.headHit);
 	}
 
 	function onPetPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -193,7 +222,9 @@ export function PetApp() {
 		e.preventDefault();
 		endDrag(false);
 		e.currentTarget.setPointerCapture(e.pointerId);
-		drag.current = { pointerId: e.pointerId, x: e.screenX, y: e.screenY, moved: false, raf: 0, dx: 0, dy: 0 };
+		const r = e.currentTarget.getBoundingClientRect();
+		const headHit = r.height > 0 && (e.clientY - r.top) / r.height < HEAD_RATIO;
+		drag.current = { pointerId: e.pointerId, x: e.screenX, y: e.screenY, moved: false, raf: 0, dx: 0, dy: 0, headHit };
 		void api.dragPet({ phase: "start" }).catch(() => {});
 	}
 
@@ -205,6 +236,7 @@ export function PetApp() {
 		d.dx = e.screenX - d.x;
 		d.dy = e.screenY - d.y;
 		if (!d.moved && d.dx * d.dx + d.dy * d.dy < 25) return;
+		if (!d.moved) setDragging(true);
 		d.moved = true;
 		if (d.raf) return;
 		d.raf = requestAnimationFrame(() => {
@@ -214,7 +246,34 @@ export function PetApp() {
 		});
 	}
 
-	function onPetClick() {
+	function react(kind: Reaction["kind"], ms: number) {
+		if (reactTimer.current) clearTimeout(reactTimer.current);
+		setReaction({ kind, line: pick(kind === "pat" ? PAT_LINES : DIZZY_LINES), key: Date.now() });
+		reactTimer.current = setTimeout(() => setReaction(null), ms);
+	}
+
+	/** 머리 클릭 = 쓰다듬기, 몸 클릭 = 통통 + 입력창, 연타 = 어지러움 */
+	function onPetClick(head: boolean) {
+		const now = Date.now();
+		lastTouch.current = now;
+		const recent = clicks.current.filter((t) => now - t < BURST_MS);
+		if (!recent.length) inputBeforeBurst.current = inputOpen;
+		recent.push(now);
+		clicks.current = recent;
+
+		if (recent.length >= BURST_CLICKS) {
+			clicks.current = [];
+			setAction("spin");
+			setTimeout(() => setAction("none"), ACTION_MS.spin);
+			react("dizzy", 1900);
+			setInputOpen(inputBeforeBurst.current);
+			return;
+		}
+		if (head) {
+			setAction("none");
+			react("pat", 1700);
+			return;
+		}
 		setAction("hop");
 		setTimeout(() => setAction("none"), ACTION_MS.hop);
 		setInputOpen((v) => {
@@ -224,6 +283,9 @@ export function PetApp() {
 		});
 		if (last) setBubbleVisible(true);
 	}
+
+	// 쓰다듬으면 잠깐 기뻐한다. 대답하는 중(말하기·생각하기)이면 그 표정을 그대로 둔다
+	const shownMood: PetMood = reaction?.kind === "pat" && (mood === "idle" || mood === "focus") ? "happy" : mood;
 
 	const minutes = capture.startedAt ? Math.floor((Date.now() - capture.startedAt) / 60_000) : 0;
 
@@ -345,9 +407,25 @@ export function PetApp() {
 					onPointerUp={(e) => drag.current?.pointerId === e.pointerId && endDrag(true)}
 					onPointerCancel={() => endDrag(false)}
 					onLostPointerCapture={() => endDrag(false)}
-					title="클릭: 물어보기 · 드래그: 이동"
+					title="클릭: 물어보기 · 머리 클릭: 쓰다듬기 · 드래그: 이동"
 				>
-					<PetCharacter mood={mood} action={action} size={110} />
+					<div className="pet-gaze">
+						<PetCharacter mood={shownMood} action={action} size={110} />
+					</div>
+					{reaction && (
+						<div key={reaction.key} className="pet-fx" aria-hidden>
+							{reaction.kind === "pat" ? (
+								<>
+									<span className="pet-fx-heart">♥</span>
+									<span className="pet-fx-heart">♥</span>
+									<span className="pet-fx-heart">♥</span>
+								</>
+							) : (
+								<span className="pet-fx-dizzy">💫</span>
+							)}
+							<span className="pet-fx-line">{reaction.line}</span>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>

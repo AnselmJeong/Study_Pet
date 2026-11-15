@@ -45,8 +45,8 @@ export function Inky({ mood, action = "none", size = 120 }: { mood: PetMood; act
 						<g fill="#fff" className="inky-blink">
 							<ellipse cx="46" cy="70" rx="6.5" ry="8" />
 							<ellipse cx="74" cy="70" rx="6.5" ry="8" />
-							<circle cx={action === "read" ? 46 : 48} cy={action === "read" ? 74 : 67} r="2" fill="#1b2350" />
-							<circle cx={action === "read" ? 74 : 76} cy={action === "read" ? 74 : 67} r="2" fill="#1b2350" />
+							<circle className="inky-pupil" cx={action === "read" ? 46 : 48} cy={action === "read" ? 74 : 67} r="2" fill="#1b2350" />
+							<circle className="inky-pupil" cx={action === "read" ? 74 : 76} cy={action === "read" ? 74 : 67} r="2" fill="#1b2350" />
 						</g>
 					</g>
 				);

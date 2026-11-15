@@ -41,6 +41,7 @@ const rpc = Electroview.defineRPC<StudyPetRPC>({
 			captureState: (p) => emit("captureState", p),
 			timelineAdded: (p) => emit("timelineAdded", p),
 			petSays: (p) => emit("petSays", p),
+			cursor: (p) => emit("cursor", p),
 		},
 	},
 });

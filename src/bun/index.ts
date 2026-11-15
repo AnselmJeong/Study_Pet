@@ -348,6 +348,41 @@ function dragPet(phase: "start" | "move" | "end", dx: number, dy: number) {
 	rememberPetPosition();
 }
 
+// ---------- 마우스 커서 → 펫 (시선 따라가기) ----------
+
+/**
+ * 펫 창은 커서가 창 위에 있을 때만 마우스 이벤트를 받는다. 창 밖 커서도 따라 보게
+ * OS 커서 위치를 읽어 펫 창 기준 좌표로 보낸다. 움직일 때만 자주(100ms), 가만히 있으면
+ * 드물게(400ms) 읽고, 위치가 바뀌었을 때만 보낸다.
+ */
+const CURSOR_FAST_MS = 100;
+const CURSOR_SLOW_MS = 400;
+const CURSOR_FAST_FOR_MS = 1000;
+
+function startCursorFeed() {
+	let lastX = Number.NaN;
+	let lastY = Number.NaN;
+	let fastUntil = 0;
+	const tick = () => {
+		try {
+			const c = Screen.getCursorScreenPoint();
+			if (c.x !== lastX || c.y !== lastY) {
+				lastX = c.x;
+				lastY = c.y;
+				fastUntil = Date.now() + CURSOR_FAST_FOR_MS;
+				if (petWin && !drag) {
+					const f = petWin.getFrame();
+					send("cursor", { x: c.x - f.x, y: c.y - f.y }, "pet");
+				}
+			}
+		} catch {
+			// 커서를 못 읽으면 창 안에서의 pointermove만 쓴다
+		}
+		setTimeout(tick, Date.now() < fastUntil ? CURSOR_FAST_MS : CURSOR_SLOW_MS);
+	};
+	tick();
+}
+
 async function walkPet(dx: number, durationMs: number) {
 	if (!petWin || drag) return;
 	const seq = ++walkSeq;
@@ -446,6 +481,7 @@ async function captureForAttach(mode: "screen" | "region", from: "pet" | "panel"
 /** 트레이·우클릭 "영역 찍어서 물어보기": 찍은 그림을 펫 입력창에 붙이고 연다 */
 async function regionAsk() {
 	if (!petWin) createPetWindow();
+startCursorFeed();
 	const r = await captureForAttach("region", "pet");
 	if (r.ok) {
 		send("attachmentAdded", r.attachment, "pet");
