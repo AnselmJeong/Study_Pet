@@ -290,8 +290,18 @@ function rememberPetPosition() {
 	}, 800);
 }
 
+/**
+ * 펫 창 위치를 기억해 둔다. 펫 창은 이 파일의 코드로만 움직이므로, 옮길 때마다 여기에 적는다.
+ * 커서 루프가 petWin.getFrame()(메인 스레드 동기 대기)을 부르지 않고 이 값을 쓴다.
+ */
+let petFrame: { x: number; y: number; width: number; height: number } | null = null;
+function notePetFrame(r: { x: number; y: number; width?: number; height?: number }) {
+	petFrame = { x: r.x, y: r.y, width: r.width ?? petFrame?.width ?? 0, height: r.height ?? petFrame?.height ?? 0 };
+}
+
 function createPetWindow(atHome = false) {
 	const f = (!atHome && savedFrame(PET_COMPACT.width, PET_COMPACT.height)) || homeFrame(PET_COMPACT.width, PET_COMPACT.height);
+	notePetFrame(f);
 
 	petWin = new BrowserWindow({
 		title: APP_NAME,
@@ -320,6 +330,7 @@ function resizePet(width: number, height: number) {
 	if (f.width === w && f.height === h) return;
 	const r = clampToWorkArea({ x: f.x + f.width - w, y: f.y + f.height - h, width: w, height: h });
 	petWin.setFrame(r.x, r.y, r.width, r.height);
+	notePetFrame(r);
 }
 
 // 드래그 중이면 걷기를 멈추고, 걷는 중에 드래그가 시작돼도 걷기가 위치를 덮어쓰지 않게 한다
@@ -337,7 +348,10 @@ function dragPet(phase: "start" | "move" | "end", dx: number, dy: number) {
 	if (!drag) return;
 	if (phase === "move") {
 		if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-		petWin.setPosition(Math.round(drag.x + dx), Math.round(drag.y + dy));
+		const x = Math.round(drag.x + dx);
+		const y = Math.round(drag.y + dy);
+		petWin.setPosition(x, y);
+		notePetFrame({ x, y });
 		return;
 	}
 	// end: 놓은 자리의 화면 작업 영역 안으로 넣고 저장한다
@@ -345,6 +359,7 @@ function dragPet(phase: "start" | "move" | "end", dx: number, dy: number) {
 	const f = petWin.getFrame();
 	const r = clampToWorkArea(f);
 	if (r.x !== f.x || r.y !== f.y) petWin.setPosition(r.x, r.y);
+	notePetFrame(r);
 	rememberPetPosition();
 }
 
@@ -355,10 +370,10 @@ function dragPet(phase: "start" | "move" | "end", dx: number, dy: number) {
  * OS 커서 위치를 읽어 펫 창 기준 좌표로 보낸다. 움직일 때만 자주(100ms), 가만히 있으면
  * 드물게(400ms) 읽고, 위치가 바뀌었을 때만 보낸다.
  *
- * 화면 좌표 그대로 보내고 창 기준 변환은 WebView(window.screenX/Y)가 한다.
  * petWin.getFrame()은 메인 스레드를 동기로 기다리는데, 우클릭 메뉴가 떠 있는 동안
  * 메인 스레드가 메뉴에 묶여 있어 이 루프가 멈추고 메뉴 클릭 처리까지 막혔다.
- * 그래서 이 루프에서는 메인 스레드를 기다리는 호출을 하지 않는다.
+ * 그래서 이 루프는 메인 스레드를 기다리지 않고 기억해 둔 창 위치(petFrame)로 창 기준 좌표를 만든다.
+ * (WKWebView의 window.screenX/Y는 이 창에서 믿을 수 없어 쓰지 않는다.)
  */
 const CURSOR_FAST_MS = 100;
 const CURSOR_SLOW_MS = 400;
@@ -379,11 +394,12 @@ function startCursorFeed() {
 				lastX = c.x;
 				lastY = c.y;
 				fastUntil = Date.now() + CURSOR_FAST_FOR_MS;
-				if (petWin && !drag) {
-					send("cursor", { x: c.x, y: c.y }, "pet");
+				const f = petFrame;
+				if (petWin && f && !drag) {
+					send("cursor", { x: c.x - f.x, y: c.y - f.y }, "pet");
 					if (!logged) {
 						logged = true;
-						appLog(`[cursor] 첫 좌표 ${c.x},${c.y}`);
+						appLog(`[cursor] 첫 좌표 ${c.x},${c.y} / 펫 창 ${f.x},${f.y} ${f.width}x${f.height}`);
 					}
 				}
 			}
@@ -406,7 +422,9 @@ async function walkPet(dx: number, durationMs: number) {
 	for (let i = 1; i <= steps; i++) {
 		if (!petWin || drag || seq !== walkSeq) return;
 		const cur = petWin.getFrame();
-		petWin.setPosition(Math.round(cur.x + (target - cur.x) / (steps - i + 1)), cur.y);
+		const x = Math.round(cur.x + (target - cur.x) / (steps - i + 1));
+		petWin.setPosition(x, cur.y);
+		notePetFrame({ x, y: cur.y, width: cur.width, height: cur.height });
 		await Bun.sleep(33);
 	}
 	if (seq === walkSeq) rememberPetPosition();
@@ -663,6 +681,7 @@ function summonPet() {
 	const f = petWin.getFrame();
 	const r = homeFrame(f.width, f.height);
 	petWin.setFrame(r.x, r.y, r.width, r.height);
+	notePetFrame(r);
 	petWin.setAlwaysOnTop(true);
 	petWin.show();
 	rememberPetPosition();
