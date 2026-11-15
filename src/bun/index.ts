@@ -363,6 +363,7 @@ function startCursorFeed() {
 	let lastX = Number.NaN;
 	let lastY = Number.NaN;
 	let fastUntil = 0;
+	let logged = false;
 	const tick = () => {
 		try {
 			const c = Screen.getCursorScreenPoint();
@@ -373,6 +374,10 @@ function startCursorFeed() {
 				if (petWin && !drag) {
 					const f = petWin.getFrame();
 					send("cursor", { x: c.x - f.x, y: c.y - f.y }, "pet");
+					if (!logged) {
+						logged = true;
+						appLog(`[cursor] 첫 좌표 ${c.x},${c.y} / 펫 창 ${f.x},${f.y} ${f.width}x${f.height}`);
+					}
 				}
 			}
 		} catch {
