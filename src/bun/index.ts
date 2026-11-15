@@ -359,7 +359,10 @@ const CURSOR_FAST_MS = 100;
 const CURSOR_SLOW_MS = 400;
 const CURSOR_FAST_FOR_MS = 1000;
 
+let cursorFeedStarted = false;
 function startCursorFeed() {
+	if (cursorFeedStarted) return;
+	cursorFeedStarted = true;
 	let lastX = Number.NaN;
 	let lastY = Number.NaN;
 	let fastUntil = 0;
@@ -486,7 +489,6 @@ async function captureForAttach(mode: "screen" | "region", from: "pet" | "panel"
 /** 트레이·우클릭 "영역 찍어서 물어보기": 찍은 그림을 펫 입력창에 붙이고 연다 */
 async function regionAsk() {
 	if (!petWin) createPetWindow();
-startCursorFeed();
 	const r = await captureForAttach("region", "pet");
 	if (r.ok) {
 		send("attachmentAdded", r.attachment, "pet");
@@ -684,6 +686,7 @@ try {
 }
 
 createPetWindow();
+startCursorFeed();
 
 // 화면 기록 권한이 없으면 (재설치하면 ad-hoc 서명이 바뀌어 권한이 풀린다) 한 번 알려 준다
 const screenOk = hasScreenPermission();
