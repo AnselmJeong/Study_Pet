@@ -105,3 +105,11 @@
 .pack-act-spin .pack-body { transform-origin: 50% 55%; animation: inky-spin 0.9s ease-in-out 1; }
 .pack-act-walk .pack-body { animation: inky-waddle 0.35s ease-in-out infinite; }
 .pack-act-doze .pack-body { animation: inky-doze 3s ease-in-out infinite; }
+
+/* 커서 쪽 바라보기: 펫 창이 --gx, --gy(-1..1)를 넣는다 (views/pet/useGaze.ts) */
+.inky .inky-eyes { transform: translate(calc(var(--gx, 0) * 2.5px), calc(var(--gy, 0) * 2px)); }
+.inky .inky-pupil { transform: translate(calc(var(--gx, 0) * 2.5px), calc(var(--gy, 0) * 2.5px)); }
+.pet-gaze {
+	transform-origin: 50% 100%;
+	transform: translateX(calc(var(--gx, 0) * 2px)) rotate(calc(var(--gx, 0) * 4deg));
+}

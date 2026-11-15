@@ -103,6 +103,8 @@ export type StudyPetRPC = {
 			timelineAdded: TimelineEntry;
 			/** 펫이 먼저 건네는 말 (격려, 농담, 휴식 권유) */
 			petSays: { text: string; kind: "encourage" | "joke" | "break" | "nudge" };
+			/** 마우스 커서 위치. 펫 창 왼쪽 위 기준 좌표(창 밖이면 음수나 창 크기보다 큰 값) */
+			cursor: { x: number; y: number };
 		};
 	}>;
 };
