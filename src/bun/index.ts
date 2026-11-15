@@ -545,8 +545,10 @@ ApplicationMenu.setApplicationMenu([
 	},
 ]);
 
-// 트레이: 제목은 늘 🖋️, 공부 세션 중이면 왼쪽에 색 점 이미지 (기록 중 빨강, 일시정지 주황).
+// 트레이: 제목은 늘 🖋️, 공부 세션 중이면 펜 왼쪽 위에 작은 색 점 (기록 중 빨강, 일시정지 주황).
 // template: false 여야 점 색이 메뉴 막대에서 그대로 보인다. 이미지는 build.copy의 assets/tray.
+// 네이티브가 PNG를 원래 크기로 그리므로 점 PNG는 14×36px, 144dpi(= 7×18pt)로 만들고
+// 점을 오른쪽 위에 둬서 펜 머리 바로 왼쪽 위에 붙어 보이게 한다.
 const TRAY_DOT = { rec: "views://app/tray/rec.png", paused: "views://app/tray/paused.png" } as const;
 const tray = new Tray({ title: "🖋️", template: false, width: 18, height: 18 });
 let trayDot: keyof typeof TRAY_DOT | "" = "";
