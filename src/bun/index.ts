@@ -354,6 +354,11 @@ function dragPet(phase: "start" | "move" | "end", dx: number, dy: number) {
  * 펫 창은 커서가 창 위에 있을 때만 마우스 이벤트를 받는다. 창 밖 커서도 따라 보게
  * OS 커서 위치를 읽어 펫 창 기준 좌표로 보낸다. 움직일 때만 자주(100ms), 가만히 있으면
  * 드물게(400ms) 읽고, 위치가 바뀌었을 때만 보낸다.
+ *
+ * 화면 좌표 그대로 보내고 창 기준 변환은 WebView(window.screenX/Y)가 한다.
+ * petWin.getFrame()은 메인 스레드를 동기로 기다리는데, 우클릭 메뉴가 떠 있는 동안
+ * 메인 스레드가 메뉴에 묶여 있어 이 루프가 멈추고 메뉴 클릭 처리까지 막혔다.
+ * 그래서 이 루프에서는 메인 스레드를 기다리는 호출을 하지 않는다.
  */
 const CURSOR_FAST_MS = 100;
 const CURSOR_SLOW_MS = 400;
@@ -375,11 +380,10 @@ function startCursorFeed() {
 				lastY = c.y;
 				fastUntil = Date.now() + CURSOR_FAST_FOR_MS;
 				if (petWin && !drag) {
-					const f = petWin.getFrame();
-					send("cursor", { x: c.x - f.x, y: c.y - f.y }, "pet");
+					send("cursor", { x: c.x, y: c.y }, "pet");
 					if (!logged) {
 						logged = true;
-						appLog(`[cursor] 첫 좌표 ${c.x},${c.y} / 펫 창 ${f.x},${f.y} ${f.width}x${f.height}`);
+						appLog(`[cursor] 첫 좌표 ${c.x},${c.y}`);
 					}
 				}
 			}
