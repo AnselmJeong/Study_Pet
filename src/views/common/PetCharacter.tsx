@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { INKY_ID, type ResolvedPack, pickState, stateFor } from "../../shared/pack";
+import { INKY_ID, type PetReaction, type ResolvedPack, pickState, stateFor } from "../../shared/pack";
 import type { PetAction, PetMood } from "../../shared/types";
 import { builtinPack } from "./builtinPacks";
 import { Inky } from "./Inky";
@@ -48,12 +48,14 @@ function useFrame(durations: number[], loop: boolean, key: string): number {
 	return i % Math.max(1, durations.length);
 }
 
-export function PackSprite({ pack, mood, action }: { pack: ResolvedPack; mood: PetMood; action: PetAction }) {
-	const { name, state } = pickState(pack, stateFor(mood, action));
+type Extra = { reaction?: PetReaction | null; look?: -1 | 0 | 1 };
+
+export function PackSprite({ pack, mood, action, reaction, look }: { pack: ResolvedPack; mood: PetMood; action: PetAction } & Extra) {
+	const { name, state } = pickState(pack, stateFor(mood, action, { reaction, look }));
 	const frame = useFrame(state.durations, state.loop, `${pack.id}:${name}`);
 	const h = pack.height;
 	// motion이 켜져 있으면 숨쉬기, 통통 튀기 같은 앱 움직임을 이미지 전체에 덧입힌다
-	const motionCls = pack.motion ? `pack pack-mood-${mood} pack-act-${action}` : "";
+	const motionCls = pack.motion ? `pack pack-mood-${mood} pack-act-${action}${reaction ? ` pack-react-${reaction}` : ""}` : "";
 
 	let img: React.ReactNode;
 	if (state.sheet) {
@@ -102,6 +104,11 @@ function SheetFrame({ url, columns, rows, col, row, height }: { url: string; col
 /** 펫 창에서 쓰는 캐릭터: 팩이 있으면 팩, 없으면 잉키 */
 export function PetCharacter({ mood, action, size = 110 }: { mood: PetMood; action: PetAction; size?: number }) {
 	const pack = usePetPack();
+	return <PetBody pack={pack} mood={mood} action={action} size={size} />;
+}
+
+/** 팩을 이미 불러온 쪽(펫 창)에서 쓴다 */
+export function PetBody({ pack, mood, action, size = 110, reaction, look }: { pack: ResolvedPack | null; mood: PetMood; action: PetAction; size?: number } & Extra) {
 	if (!pack) return <Inky mood={mood} action={action} size={size} />;
-	return <PackSprite pack={pack} mood={mood} action={action} />;
+	return <PackSprite pack={pack} mood={mood} action={action} reaction={reaction} look={look} />;
 }

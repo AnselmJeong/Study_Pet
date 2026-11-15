@@ -109,6 +109,14 @@
 /* 커서 쪽 바라보기: 펫 창이 --gx, --gy(-1..1)를 넣는다 (views/pet/useGaze.ts) */
 .inky .inky-eyes { transform: translate(calc(var(--gx, 0) * 2.5px), calc(var(--gy, 0) * 2px)); }
 .inky .inky-pupil { transform: translate(calc(var(--gx, 0) * 2.5px), calc(var(--gy, 0) * 2.5px)); }
+/* 반응 (pat/dizzy 프레임과 함께) */
+@keyframes pack-nuzzle {
+	0%, 100% { transform: rotate(0deg) scale(1, 1); }
+	30% { transform: rotate(-4deg) scale(1.02, 0.98); }
+	70% { transform: rotate(4deg) scale(1.02, 0.98); }
+}
+.pack-react-pat .pack-body { animation: pack-nuzzle 0.85s ease-in-out 2; }
+.pack-react-dizzy .pack-body { transform-origin: 50% 100%; animation: inky-wiggle 0.45s ease-in-out 4; }
 .pet-gaze {
 	transform-origin: 50% 100%;
 	transform: translateX(calc(var(--gx, 0) * 2px)) rotate(calc(var(--gx, 0) * 4deg));
