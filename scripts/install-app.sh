@@ -2,11 +2,12 @@
 # stable 빌드 결과물(자가 압축 해제 래퍼)에서 실제 앱을 풀어,
 # 메뉴 막대 앱(LSUIElement)으로 패치하고 "Inky Local Signing"으로 재서명한 뒤 /Applications에 설치한다.
 # 사용: hutch run build && scripts/install-app.sh  (기존 /Applications/Inky.app은 덮어쓴다)
+#       다른 곳에 설치: INSTALL_DIR=/Volumes/Aquatope/Applications scripts/install-app.sh
 set -euo pipefail
 cd "${0:A:h}/.."
 NAME="Inky"
 WRAP="build/stable-macos-arm64/$NAME.app"
-DEST="/Applications/$NAME.app"
+DEST="${INSTALL_DIR:-/Applications}/$NAME.app"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
